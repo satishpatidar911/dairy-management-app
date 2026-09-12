@@ -1,0 +1,10 @@
+{
+  "provider": "fast2sms",
+  "apiKey": "",
+  "twoFactorApiKey": "",
+  "twilioSid": "",
+  "twilioAuthToken": "",
+  "twilioFrom": "",
+  "customUrl": "",
+  "isConfigured": false
+}
