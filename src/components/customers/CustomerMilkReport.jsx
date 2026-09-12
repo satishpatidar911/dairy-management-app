@@ -19,7 +19,9 @@ import {
   Milk,
   HandCoins,
   ReceiptText,
-  AlertCircle
+  AlertCircle,
+  Send,
+  Share2
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -515,6 +517,45 @@ export const CustomerMilkReport = ({
     document.body.removeChild(link);
   };
 
+  // WhatsApp Share Handler
+  const handleShareWhatsApp = () => {
+    if (!selectedCustomer) return;
+    const phone = (selectedCustomer.phone || selectedCustomer.mobile || '').replace(/\D/g, '');
+    const farmName = farmProfile?.farmName || 'SHIVAJI MILK CENTER';
+    const monthObj = monthOptions.find(m => m.ym === selectedMonth);
+    const monthLabel = monthObj ? monthObj.label : selectedMonth;
+
+    let msg = `🥛 *${farmName}* 🥛\n`;
+    msg += `📄 *ग्राहक दूध बिल एवं हिसाब*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👤 *ग्राहक:* ${selectedCustomer.name}\n`;
+    msg += `📅 *माह (Month):* ${monthLabel}\n`;
+    msg += `🗓️ *अवधि:* ${fromDate} से ${toDate}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🌅 *सुबह का दूध:* ${tableTotals.morningTotal} L\n`;
+    msg += `🌇 *शाम का दूध:* ${tableTotals.eveningTotal} L\n`;
+    msg += `🥛 *कुल दूध सप्लाई:* ${tableTotals.totalMilk} L\n`;
+    msg += `💵 *दूध दर:* ₹${tableTotals.avgRate} / L\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 *इस माह का कुल बिल:* ₹${tableTotals.totalAmount.toLocaleString('en-IN')}\n`;
+    msg += `💳 *इस माह में जमा:* ₹${kpiStats.paidAmount}\n`;
+    msg += `🔴 *इस माह का शेष बकाया:* ₹${kpiStats.balanceDue}\n`;
+    if (kpiStats.totalCustomerBalance && kpiStats.totalCustomerBalance !== '0') {
+      msg += `⚖️ *कुल खाता बकाया:* ₹${kpiStats.totalCustomerBalance}\n`;
+    }
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    if (farmProfile?.upiId) {
+      msg += `📲 *PhonePe / GPay / UPI:* ${farmProfile.upiId}\n`;
+    }
+    msg += `कृपया बकाया राशि का भुगतान समय पर करें।\n`;
+    msg += `शुद्ध एवं ताजा दूध। धन्यवाद! 🙏\n`;
+    msg += `📞 *संपर्क:* ${farmProfile?.phone || '8770234735'}`;
+
+    const encoded = encodeURIComponent(msg);
+    const targetUrl = phone ? `https://wa.me/91${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    window.open(targetUrl, '_blank');
+  };
+
   return (
     <div className="space-y-4 pb-12 print:p-0 print:m-0 print:space-y-2">
       {/* 1. TOP PAGE HEADER */}
@@ -537,8 +578,18 @@ export const CustomerMilkReport = ({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
+            onClick={handleShareWhatsApp}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer ring-1 ring-emerald-400/50"
+            title="ग्राहक को WhatsApp पर बिल व हिसाब शेयर करें"
+          >
+            <Send className="w-4 h-4" />
+            <span>WhatsApp बिल</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setIsEntryModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 active:scale-95 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
             title="नया दूध वितरण जोड़ें"
           >
             <Plus className="w-4 h-4" />
@@ -558,7 +609,7 @@ export const CustomerMilkReport = ({
           <button
             type="button"
             onClick={handleExportExcel}
-            className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 active:scale-95 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold border border-slate-700 shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
             title="Excel / CSV डाउनलोड करें"
           >
             <Download className="w-4 h-4" />
