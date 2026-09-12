@@ -777,6 +777,7 @@ html.dark .shadow-2xl {
 }
 
 /* Completely remove Netlify Badge & Watermark */
+body > *:not(#root):not(script),
 [data-netlify-deploy-preview-banner],
 [class*="netlify"],
 [id*="netlify"],
@@ -791,4 +792,5 @@ netlify-drawer {
   height: 0 !important;
   position: absolute !important;
   clip: rect(0,0,0,0) !important;
+  z-index: -999999 !important;
 }

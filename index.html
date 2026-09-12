@@ -17,6 +17,9 @@
     <style>
       [data-netlify-deploy-preview-banner],
       [class*="netlify"],
+      body > *:not(#root):not(script),
+      [data-netlify-deploy-preview-banner],
+      [class*="netlify"],
       [id*="netlify"],
       iframe[src*="netlify"],
       a[href*="netlify.com"],
@@ -27,24 +30,30 @@
         pointer-events: none !important;
         width: 0 !important;
         height: 0 !important;
+        position: absolute !important;
+        z-index: -999999 !important;
       }
     </style>
     <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        var removeBadges = function() {
-          var els = document.querySelectorAll('a[href*="netlify"], [class*="netlify"], [id*="netlify"], netlify-drawer');
-          for (var i = 0; i < els.length; i++) {
-            if (!els[i].closest('#root')) {
-              els[i].remove();
+      (function() {
+        function removeInjected() {
+          if (!document.body) return;
+          var children = Array.from(document.body.children);
+          for (var i = 0; i < children.length; i++) {
+            var el = children[i];
+            if (el.id !== 'root' && el.tagName !== 'SCRIPT') {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+              el.style.setProperty('opacity', '0', 'important');
+              try { el.remove(); } catch(e) {}
             }
           }
-        };
-        removeBadges();
-        var observer = new MutationObserver(removeBadges);
-        if (document.body) {
-          observer.observe(document.body, { childList: true, subtree: true });
         }
-      });
+        removeInjected();
+        var timer = setInterval(removeInjected, 40);
+        setTimeout(function() { clearInterval(timer); setInterval(removeInjected, 200); }, 5000);
+        document.addEventListener('DOMContentLoaded', removeInjected);
+      })();
     </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased font-sans selection:bg-dairy-500 selection:text-white min-h-screen">
