@@ -12,6 +12,40 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Hide and remove Netlify badge / drawer -->
+    <style>
+      [data-netlify-deploy-preview-banner],
+      [class*="netlify"],
+      [id*="netlify"],
+      iframe[src*="netlify"],
+      a[href*="netlify.com"],
+      netlify-drawer {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        width: 0 !important;
+        height: 0 !important;
+      }
+    </style>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        var removeBadges = function() {
+          var els = document.querySelectorAll('a[href*="netlify"], [class*="netlify"], [id*="netlify"], netlify-drawer');
+          for (var i = 0; i < els.length; i++) {
+            if (!els[i].closest('#root')) {
+              els[i].remove();
+            }
+          }
+        };
+        removeBadges();
+        var observer = new MutationObserver(removeBadges);
+        if (document.body) {
+          observer.observe(document.body, { childList: true, subtree: true });
+        }
+      });
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased font-sans selection:bg-dairy-500 selection:text-white min-h-screen">
     <div id="root"></div>
