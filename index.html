@@ -17,13 +17,12 @@
     <style>
       [data-netlify-deploy-preview-banner],
       [class*="netlify"],
-      body > *:not(#root):not(script),
-      [data-netlify-deploy-preview-banner],
-      [class*="netlify"],
       [id*="netlify"],
+      netlify-drawer,
       iframe[src*="netlify"],
       a[href*="netlify.com"],
-      netlify-drawer {
+      div:has(a[href*="netlify.com"]),
+      body > *:not(#root):not(script):not(style) {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -31,6 +30,8 @@
         width: 0 !important;
         height: 0 !important;
         position: absolute !important;
+        clip-path: inset(100%) !important;
+        transform: scale(0) !important;
         z-index: -999999 !important;
       }
     </style>
@@ -38,21 +39,43 @@
       (function() {
         function removeInjected() {
           if (!document.body) return;
+          // 1. Remove all direct non-root children in body
           var children = Array.from(document.body.children);
           for (var i = 0; i < children.length; i++) {
             var el = children[i];
-            if (el.id !== 'root' && el.tagName !== 'SCRIPT') {
-              el.style.setProperty('display', 'none', 'important');
-              el.style.setProperty('visibility', 'hidden', 'important');
-              el.style.setProperty('opacity', '0', 'important');
-              try { el.remove(); } catch(e) {}
+            if (el.id !== 'root' && el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+              try { el.remove(); } catch(e) {
+                el.style.display = 'none';
+              }
             }
           }
+          // 2. Remove any netlify link or container anywhere
+          var links = document.querySelectorAll('a[href*="netlify.com"], netlify-drawer, [class*="netlify"], [id*="netlify"]');
+          links.forEach(function(item) {
+            try {
+              var parent = item;
+              while (parent && parent !== document.body && parent.parentElement && parent.parentElement !== document.getElementById('root')) {
+                if (parent.parentElement === document.body) {
+                  parent.remove();
+                  return;
+                }
+                parent = parent.parentElement;
+              }
+              item.remove();
+            } catch(e) {}
+          });
         }
         removeInjected();
-        var timer = setInterval(removeInjected, 40);
-        setTimeout(function() { clearInterval(timer); setInterval(removeInjected, 200); }, 5000);
+        var timer = setInterval(removeInjected, 50);
+        setTimeout(function() { clearInterval(timer); setInterval(removeInjected, 300); }, 5000);
         document.addEventListener('DOMContentLoaded', removeInjected);
+
+        if (window.MutationObserver) {
+          var observer = new MutationObserver(function(mutations) {
+            removeInjected();
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
       })();
     </script>
   </head>

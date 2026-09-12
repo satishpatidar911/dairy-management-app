@@ -13,8 +13,10 @@ export const SearchableSelect = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef(null);
   const searchInputRef = useRef(null);
+  const listContainerRef = useRef(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -60,6 +62,21 @@ export const SearchableSelect = ({
     return labelMatch || subMatch || valMatch || tagMatch || nameMatch;
   });
 
+  // Reset highlight index when search query or open status changes
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [search, isOpen]);
+
+  // Auto-scroll highlighted item into view
+  useEffect(() => {
+    if (isOpen && listContainerRef.current) {
+      const activeEl = listContainerRef.current.querySelector(`[data-index="${highlightedIndex}"]`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex, isOpen]);
+
   const handleSelect = (val) => {
     onChange(val);
     setIsOpen(false);
@@ -67,13 +84,25 @@ export const SearchableSelect = ({
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      setIsOpen(false);
+    if (!filteredOptions || filteredOptions.length === 0) {
+      if (e.key === 'Escape') setIsOpen(false);
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev < filteredOptions.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev > 0 ? prev - 1 : filteredOptions.length - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (filteredOptions.length > 0) {
-        handleSelect(filteredOptions[0].value);
+      if (filteredOptions[highlightedIndex]) {
+        handleSelect(filteredOptions[highlightedIndex].value);
       }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
     }
   };
 
@@ -93,7 +122,19 @@ export const SearchableSelect = ({
     ? 'text-amber-600 dark:text-amber-400'
     : 'text-purple-600 dark:text-purple-400';
 
-  const getOptionClasses = (isSelected) => {
+  const getOptionClasses = (isSelected, isHighlighted) => {
+    if (isHighlighted) {
+      switch (accentColor) {
+        case 'emerald':
+          return 'bg-emerald-600 text-white font-bold ring-1 ring-emerald-400 shadow-sm';
+        case 'rose':
+          return 'bg-rose-600 text-white font-bold ring-1 ring-rose-400 shadow-sm';
+        case 'amber':
+          return 'bg-amber-600 text-white font-bold ring-1 ring-amber-400 shadow-sm';
+        default:
+          return 'bg-purple-600 text-white font-bold ring-1 ring-purple-400 shadow-sm';
+      }
+    }
     if (isSelected) {
       switch (accentColor) {
         case 'emerald':
@@ -180,52 +221,82 @@ export const SearchableSelect = ({
           </div>
 
           {/* Options List */}
-          <div className="max-h-60 overflow-y-auto p-1 divide-y divide-slate-50 dark:divide-slate-800/50">
+          <div
+            ref={listContainerRef}
+            role="listbox"
+            className="max-h-60 overflow-y-auto p-1 divide-y divide-slate-50 dark:divide-slate-800/50"
+          >
             {filteredOptions.length === 0 ? (
               <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
                 🔍 कोई पशु नहीं मिला (No cattle found matching "{search}")
               </div>
             ) : (
-              filteredOptions.map((opt) => {
+              filteredOptions.map((opt, index) => {
                 const isSelected = String(opt.value) === String(value);
+                const isHighlighted = index === highlightedIndex;
                 return (
                   <button
                     key={opt.value}
                     type="button"
+                    data-index={index}
+                    role="option"
+                    aria-selected={isSelected}
+                    onMouseEnter={() => setHighlightedIndex(index)}
                     onClick={() => handleSelect(opt.value)}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer ${getOptionClasses(isSelected)}`}
+                    className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer ${getOptionClasses(isSelected, isHighlighted)}`}
                   >
                     <div className="flex items-center gap-2 truncate flex-1">
                       {opt.icon && <span className="text-sm shrink-0">{opt.icon}</span>}
                       <div className="truncate">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`font-bold ${
-                            isSelected 
+                            isHighlighted
+                              ? 'text-white'
+                              : isSelected 
                               ? 'text-inherit' 
                               : 'text-slate-900 dark:text-slate-100'
                           }`}>
                             {opt.label}
                           </span>
                           {opt.tag && opt.tag !== opt.label && (
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[10px] font-mono">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                              isHighlighted
+                                ? 'bg-white/20 text-white border-white/30'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}>
                               {opt.tag}
                             </span>
                           )}
                         </div>
                         {opt.sublabel && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          <div className={`text-[11px] truncate mt-0.5 ${
+                            isHighlighted ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'
+                          }`}>
                             {opt.sublabel}
                           </div>
                         )}
                       </div>
                     </div>
-                    {isSelected && (
-                      <Check className={`w-4 h-4 shrink-0 ${checkColor}`} />
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {isSelected && (
+                        <Check className={`w-4 h-4 shrink-0 ${isHighlighted ? 'text-white' : checkColor}`} />
+                      )}
+                      {isHighlighted && (
+                        <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono text-white hidden sm:inline">
+                          ↵ Enter
+                        </span>
+                      )}
+                    </div>
                   </button>
                 );
               })
             )}
+          </div>
+
+          {/* Keyboard Helper Footer */}
+          <div className="p-1 px-3 bg-slate-50/90 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>नेविगेशन: <strong className="text-slate-700 dark:text-slate-200">↑ ↓</strong></span>
+            <span>चुनने के लिए: <strong className="text-purple-600 dark:text-purple-400">Enter ↵</strong></span>
           </div>
         </div>
       )}

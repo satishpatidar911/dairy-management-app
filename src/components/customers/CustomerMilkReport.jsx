@@ -70,7 +70,10 @@ export const CustomerMilkReport = ({
 
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const [highlightedCustomerIndex, setHighlightedCustomerIndex] = useState(0);
   const dropdownRef = useRef(null);
+  const customerSearchInputRef = useRef(null);
+  const customerListRef = useRef(null);
 
   // Close customer dropdown on outside click
   useEffect(() => {
@@ -82,6 +85,49 @@ export const CustomerMilkReport = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Reset highlight index when query or open state changes
+  useEffect(() => {
+    setHighlightedCustomerIndex(0);
+  }, [customerSearchQuery, isCustomerDropdownOpen]);
+
+  // Keep highlighted customer in view on arrow key navigation
+  useEffect(() => {
+    if (isCustomerDropdownOpen && customerListRef.current) {
+      const activeEl = customerListRef.current.querySelector(`[data-index="${highlightedCustomerIndex}"]`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedCustomerIndex, isCustomerDropdownOpen]);
+
+  const handleCustomerSearchKeyDown = (e) => {
+    if (!searchedCustomers || searchedCustomers.length === 0) {
+      if (e.key === 'Escape') {
+        setIsCustomerDropdownOpen(false);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedCustomerIndex(prev => (prev < searchedCustomers.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedCustomerIndex(prev => (prev > 0 ? prev - 1 : searchedCustomers.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const targetCustomer = searchedCustomers[highlightedCustomerIndex];
+      if (targetCustomer) {
+        setSelectedCustomerId(targetCustomer.id);
+        setIsCustomerDropdownOpen(false);
+        setCustomerSearchQuery('');
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsCustomerDropdownOpen(false);
+    }
+  };
 
   const selectedCustomer = useMemo(() => {
     return customers.find(c => String(c.id) === String(selectedCustomerId)) || customers[0] || null;
@@ -572,56 +618,126 @@ export const CustomerMilkReport = ({
             </label>
 
             <div
+              tabIndex={0}
+              role="button"
+              aria-haspopup="listbox"
+              aria-expanded={isCustomerDropdownOpen}
               onClick={() => setIsCustomerDropdownOpen(prev => !prev)}
-              className="w-full bg-slate-950 border border-slate-700 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white flex items-center justify-between cursor-pointer shadow-inner"
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsCustomerDropdownOpen(true);
+                }
+              }}
+              className="w-full bg-slate-950 border border-slate-700 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white flex items-center justify-between cursor-pointer shadow-inner"
             >
               <div className="flex items-center gap-2 truncate">
                 <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                 <span className="truncate">{selectedCustomer?.name || 'ग्राहक चुनें'}</span>
               </div>
-              <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+              <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform duration-150 ${isCustomerDropdownOpen ? 'rotate-180 text-blue-400' : ''}`} />
             </div>
 
             {/* Dropdown Options List */}
             {isCustomerDropdownOpen && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-60 flex flex-col animate-in fade-in zoom-in-95">
-                <div className="p-2 border-b border-slate-800 bg-slate-950/60">
-                  <input
-                    type="text"
-                    autoFocus
-                    placeholder="ग्राहक खोजें (Search Name/Mobile)..."
-                    value={customerSearchQuery}
-                    onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                  />
+              <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-72 flex flex-col animate-in fade-in zoom-in-95">
+                {/* Search Input Box */}
+                <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+                  <div className="relative flex items-center">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
+                    <input
+                      ref={customerSearchInputRef}
+                      type="text"
+                      autoFocus
+                      placeholder="ग्राहक खोजें (Name / Mobile)..."
+                      value={customerSearchQuery}
+                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                      onKeyDown={handleCustomerSearchKeyDown}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-medium"
+                    />
+                    {customerSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomerSearchQuery('')}
+                        className="absolute right-2 text-slate-400 hover:text-slate-200 p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between px-1 pt-1 text-[10px] text-slate-400">
+                    <span>{searchedCustomers.length} ग्राहक मिले</span>
+                    <span className="text-blue-400 font-semibold hidden sm:inline">एरो कीज़ (↑ / ↓) से चुनें</span>
+                  </div>
                 </div>
 
-                <div className="overflow-y-auto max-h-48 divide-y divide-slate-800/60">
-                  {searchedCustomers.map(cust => (
-                    <div
-                      key={cust.id}
-                      onClick={() => {
-                        setSelectedCustomerId(cust.id);
-                        setIsCustomerDropdownOpen(false);
-                        setCustomerSearchQuery('');
-                      }}
-                      className={`px-3 py-2 text-xs font-bold cursor-pointer transition-colors flex items-center justify-between ${
-                        selectedCustomer?.id === cust.id
-                          ? 'bg-blue-600/30 text-blue-300'
-                          : 'hover:bg-slate-800 text-slate-200'
-                      }`}
-                    >
-                      <div>
-                        <div className="font-extrabold">{cust.name}</div>
-                        <div className="text-[10px] text-slate-400 font-normal">
-                          {cust.mobile || cust.phone || 'No Mobile'} • Rate: ₹{cust.rate || 58}/L
-                        </div>
-                      </div>
-                      {selectedCustomer?.id === cust.id && (
-                        <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                      )}
+                {/* Scrollable Customer List */}
+                <div
+                  ref={customerListRef}
+                  role="listbox"
+                  className="overflow-y-auto max-h-52 divide-y divide-slate-800/60"
+                >
+                  {searchedCustomers.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400">
+                      🔍 कोई ग्राहक नहीं मिला (No customer found matching "{customerSearchQuery}")
                     </div>
-                  ))}
+                  ) : (
+                    searchedCustomers.map((cust, idx) => {
+                      const isHighlighted = idx === highlightedCustomerIndex;
+                      const isSelected = selectedCustomer?.id === cust.id;
+                      return (
+                        <div
+                          key={cust.id}
+                          data-index={idx}
+                          role="option"
+                          aria-selected={isSelected}
+                          onMouseEnter={() => setHighlightedCustomerIndex(idx)}
+                          onClick={() => {
+                            setSelectedCustomerId(cust.id);
+                            setIsCustomerDropdownOpen(false);
+                            setCustomerSearchQuery('');
+                          }}
+                          className={`px-3 py-2.5 text-xs font-bold cursor-pointer transition-all flex items-center justify-between ${
+                            isHighlighted
+                              ? 'bg-blue-600 text-white ring-1 ring-blue-400 shadow-sm'
+                              : isSelected
+                              ? 'bg-blue-950/60 text-blue-300'
+                              : 'hover:bg-slate-800 text-slate-200'
+                          }`}
+                        >
+                          <div>
+                            <div className={`font-extrabold flex items-center gap-1.5 ${isHighlighted ? 'text-white' : 'text-slate-100'}`}>
+                              <span>{cust.name}</span>
+                              {isSelected && !isHighlighted && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-semibold">
+                                  Current
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-[10px] font-normal mt-0.5 ${isHighlighted ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {cust.mobile || cust.phone || 'No Mobile'} • Rate: ₹{cust.rate || 58}/L
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {isSelected && (
+                              <CheckCircle2 className={`w-4 h-4 ${isHighlighted ? 'text-white' : 'text-blue-400'}`} />
+                            )}
+                            {isHighlighted && (
+                              <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono text-white">
+                                ↵ Enter
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Keyboard Helper Footer */}
+                <div className="p-1.5 px-3 bg-slate-950/90 border-t border-slate-800/80 text-[10px] text-slate-400 flex items-center justify-between">
+                  <span>नेविगेशन: <strong className="text-slate-200">↑ ↓</strong> एरो</span>
+                  <span>चुनने हेतु: <strong className="text-blue-400">Enter ↵</strong></span>
                 </div>
               </div>
             )}
