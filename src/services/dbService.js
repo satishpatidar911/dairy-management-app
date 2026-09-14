@@ -74,12 +74,18 @@ export const dbService = {
   // Guarantees that any delivery in the Google Sheet missing from Supabase is automatically backfilled into Supabase!
   async reconcileGoogleSheet(customSheetUrl = null) {
     try {
-      const sheetUrl = customSheetUrl || 'https://docs.google.com/spreadsheets/d/1-YeMwL36BtMSzMvlbJs8xm3CHWpsm7SsFfRQPlK6-8E/gviz/tq?tqx=out:csv&sheet=CUSTOMER%20INTRY';
+      const sheetUrl = customSheetUrl || 'https://docs.google.com/spreadsheets/d/1-YeMwL36BtMSzMvlbJs8xm3CHWpsm7SsFfRQPlK6-8E/export?format=csv&gid=787113179';
       const idMatch = sheetUrl.match(/\/d\/([^\/\?#&]+)/);
+      const gidMatch = sheetUrl.match(/[?#&]gid=([0-9]+)/);
       const sheetId = idMatch ? decodeURIComponent(idMatch[1]) : '1-YeMwL36BtMSzMvlbJs8xm3CHWpsm7SsFfRQPlK6-8E';
-      const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('CUSTOMER INTRY')}`;
+      const gid = gidMatch ? gidMatch[1] : '787113179';
+      const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
-      const res = await fetch(gvizUrl);
+      let res = await fetch(exportUrl);
+      if (!res.ok) {
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('CUSTOMER INTRY')}`;
+        res = await fetch(gvizUrl);
+      }
       if (!res.ok) return 0;
       const csv = await res.text();
       const lines = csv.split('\n');
@@ -95,7 +101,7 @@ export const dbService = {
       if (error) return 0;
 
       const existingRowSet = new Set((recentSupabase || []).map(d => d.source_row).filter(Boolean));
-      const maxId = recentSupabase?.[0]?.delivery_id || 33750;
+      const maxId = recentSupabase?.[0]?.delivery_id || 33870;
       let nextId = maxId + 1;
 
       const missingRows = [];
@@ -159,8 +165,8 @@ export const dbService = {
   async loadAll() {
     let cloudData = null;
     try {
-      // Client-side reconcile is disabled because Google Apps Script now syncs directly in real-time
-      // await this.reconcileGoogleSheet().catch(() => {});
+      // Auto-reconcile in background to guarantee zero missing entries
+      await this.reconcileGoogleSheet().catch(() => {});
 
       const [
         farmProfileRes,

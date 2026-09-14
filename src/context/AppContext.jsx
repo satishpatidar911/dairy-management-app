@@ -1268,16 +1268,27 @@ export const AppProvider = ({ children }) => {
         // Backend not available (e.g. static hosting on Vercel/Netlify)
       }
 
-      // Fallback: Direct Google Visualization API fetch from browser
+      // Fallback: Direct Google fetch from browser
       if (!csvText) {
         const idMatch = targetUrl.match(/\/d\/([^\/\?#&]+)/);
+        const gidMatch = targetUrl.match(/[?#&]gid=([0-9]+)/);
         if (idMatch) {
           const sheetId = decodeURIComponent(idMatch[1]);
-          const tabName = googleSheetsConfig.tabName || 'CUSTOMER INTRY';
-          const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-          const gvizRes = await fetch(gvizUrl);
-          if (gvizRes.ok) {
-            csvText = await gvizRes.text();
+          const gid = gidMatch ? gidMatch[1] : '787113179';
+          try {
+            const expRes = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`);
+            if (expRes.ok) {
+              csvText = await expRes.text();
+            }
+          } catch (e) {}
+
+          if (!csvText) {
+            const tabName = googleSheetsConfig.tabName || 'CUSTOMER INTRY';
+            const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+            const gvizRes = await fetch(gvizUrl);
+            if (gvizRes.ok) {
+              csvText = await gvizRes.text();
+            }
           }
         }
       }

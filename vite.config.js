@@ -201,20 +201,21 @@ const databaseStoragePlugin = () => ({
             } else if (sheetUrl.includes('/d/')) {
               const idMatch = sheetUrl.match(/\/d\/([^\/\?#&]+)/);
               const gidMatch = sheetUrl.match(/[?#&]gid=([0-9]+)/);
-              const gid = gidMatch ? gidMatch[1] : '0';
+              const gid = gidMatch ? gidMatch[1] : '787113179';
 
               if (idMatch) {
                 const sheetId = decodeURIComponent(idMatch[1]);
-                // Strategy 1: Google Visualization Query API with CUSTOMER INTRY tab name
+                // Strategy 1: Standard Export CSV with GID (ignores active UI sheet filters and fetches all rows)
+                urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`);
+                urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=787113179`);
+                // Strategy 2: Google Visualization Query API with CUSTOMER INTRY tab name
                 urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('CUSTOMER INTRY')}`);
                 urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('CUSTOMER ENTRY')}`);
-                // Strategy 2: Google Visualization Query API with gid
+                // Strategy 3: Google Visualization Query API with gid
                 urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`);
-                // Strategy 3: Google Visualization Query API without gid
-                urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`);
-                // Strategy 4: Standard Export CSV
-                urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`);
+                // Strategy 4: Standard Export CSV without gid
                 urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`);
+                urlsToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`);
               }
             }
 
