@@ -107,7 +107,7 @@ export const AnimalDetailModal = ({ animal, onClose, onSelectAnimal = null, onAd
   // Filter logs for this animal
   const animalMilkLogs = milkEntries.filter(m => m.animalId === animal.tagNo || m.animalName === animal.name);
   const animalHealthLogs = healthRecords.filter(h => h.animalId === animal.tagNo || h.animalName?.includes(animal.name));
-  const animalBreedingLogs = breedingRecords.filter(b => b.animalId === animal.tagNo || b.animalName?.includes(animal.name));
+  const animalBreedingLogs = breedingRecords.filter(b => b.animalId === animal.tagNo || b.animalId === animal.tag_no || b.animalName === animal.name || b.animalName?.includes(animal.name));
 
   // Milk Chart data
   const chartData = animalMilkLogs.slice(0, 7).reverse().map((entry, idx) => ({
@@ -573,7 +573,7 @@ export const AnimalDetailModal = ({ animal, onClose, onSelectAnimal = null, onAd
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700">
                       <div><strong>AI Date (AI तारीख):</strong> {brd.aiDate}</div>
-                      <div><strong>Semen Straw Tag (सीमन स्ट्रॉ):</strong> {brd.bullStrawTag}</div>
+                      <div><strong>Semen Straw Tag (सीमन स्ट्रॉ):</strong> {brd.bullStrawTag || brd.bullId || 'N/A'}</div>
                       <div className="col-span-2">
                         <strong>Expected Calving (संभावित प्रसव तारीख):</strong>{' '}
                         <span className="font-bold text-purple-800">{brd.expectedCalvingDate}</span>

@@ -334,7 +334,31 @@ export const dbService = {
         feedStock: Array.isArray(feedRes) && feedRes.length > 0 ? snakeToCamel(feedRes) : null,
         healthRecords: Array.isArray(healthRes) ? snakeToCamel(healthRes) : [],
         vaccinations: Array.isArray(vacRes) ? snakeToCamel(vacRes) : [],
-        breedingRecords: Array.isArray(brdRes) ? snakeToCamel(brdRes) : [],
+        breedingRecords: Array.isArray(brdRes) ? brdRes.map(b => {
+          let tech = b.technician || '';
+          let notes = '';
+          const noteMatch = tech.match(/\((.*?)\)$/);
+          if (noteMatch) {
+            notes = noteMatch[1];
+            tech = tech.replace(/\s*\(.*?\)$/, '').trim();
+          }
+
+          return {
+            id: b.id,
+            animalId: b.animal_id,
+            animalName: b.animal_name,
+            aiDate: b.ai_date,
+            bullStrawTag: b.bull_id || '',
+            bullId: b.bull_id || '',
+            technicianName: tech,
+            technician: tech,
+            expectedCalvingDate: b.expected_calving_date,
+            status: b.status || 'inseminated',
+            isPregnant: b.status === 'pregnant' || b.status === 'inseminated',
+            notes: notes,
+            createdAt: b.created_at
+          };
+        }) : [],
       };
     } catch (err) {
       console.warn('Supabase fetch failed, falling back to local storage:', err);
@@ -651,27 +675,49 @@ export const dbService = {
   // 14. Breeding Records
   async saveBreedingRecord(brd) {
     try {
+      let tech = brd.technicianName || brd.technician || null;
+      if (brd.notes && String(brd.notes).trim()) {
+        const noteText = String(brd.notes).trim();
+        tech = tech ? `${tech} (${noteText})` : noteText;
+      }
+
       const payload = {
         id: brd.id || `BRD-${Date.now().toString().slice(-4)}`,
         animal_id: brd.animalId || brd.animal_id,
         animal_name: brd.animalName || brd.animal_name || null,
         ai_date: brd.aiDate || brd.ai_date || brd.breedingDate || brd.date || new Date().toISOString().split('T')[0],
         bull_id: brd.bullStrawTag || brd.bullId || brd.bull_id || null,
-        technician: brd.technicianName || brd.technician || null,
+        technician: tech,
         expected_calving_date: brd.expectedCalvingDate || brd.expected_calving_date || null,
-        status: brd.status || 'inseminated',
-        notes: brd.notes || null
+        status: brd.status || 'inseminated'
       };
+
       const { error } = await supabase.from('breeding_records').upsert(payload);
-      if (error) console.error('Supabase saveBreedingRecord error:', error);
-    } catch (e) {}
+      if (error) {
+        console.error('Supabase saveBreedingRecord error:', error);
+        return { success: false, error };
+      }
+      console.log('✓ Breeding record saved to Supabase:', payload.id);
+      return { success: true, id: payload.id };
+    } catch (e) {
+      console.error('Supabase saveBreedingRecord exception:', e);
+      return { success: false, error: e };
+    }
   },
 
   async deleteBreedingRecord(id) {
     try {
       const { error } = await supabase.from('breeding_records').delete().eq('id', id);
-      if (error) console.error('Supabase deleteBreedingRecord error:', error);
-    } catch (e) {}
+      if (error) {
+        console.error('Supabase deleteBreedingRecord error:', error);
+        return { success: false, error };
+      }
+      console.log('✓ Breeding record deleted from Supabase:', id);
+      return { success: true };
+    } catch (e) {
+      console.error('Supabase deleteBreedingRecord exception:', e);
+      return { success: false, error: e };
+    }
   },
 
   // 15. Ledger Transactions

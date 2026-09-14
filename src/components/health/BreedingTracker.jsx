@@ -39,17 +39,20 @@ export const BreedingTracker = () => {
 
   const femaleAnimalOptions = animals
     .filter(a => a.gender === 'female' || (!a.gender && a.type !== 'keda'))
-    .map(a => ({
-      value: a.tagNo,
-      label: `${a.tagNo} - ${a.name}`,
-      tag: a.tagNo,
-      name: a.name,
-      sublabel: `${a.type === 'cow' ? 'Cow (गाय)' : 'Buffalo (भैंस)'}${a.breed ? ` • ${a.breed}` : ''}`,
-      icon: a.type === 'cow' ? '🐄' : '🐃'
-    }));
+    .map(a => {
+      const tag = a.tagNo || a.tag_no || a.id || '';
+      return {
+        value: tag,
+        label: `${tag} - ${a.name || 'पशु'}`,
+        tag: tag,
+        name: a.name || 'पशु',
+        sublabel: `${a.type === 'cow' ? 'Cow (गाय)' : 'Buffalo (भैंस)'}${a.breed ? ` • ${a.breed}` : ''}`,
+        icon: a.type === 'cow' ? '🐄' : '🐃'
+      };
+    });
 
   const initialFormState = {
-    animalId: femaleAnimalOptions[0]?.value || animals[0]?.tagNo || '',
+    animalId: femaleAnimalOptions[0]?.value || animals[0]?.tagNo || animals[0]?.tag_no || '',
     aiDate: new Date().toISOString().split('T')[0],
     bullStrawTag: 'SAH-SUPER-88',
     technicianName: 'डॉक्टर',
@@ -63,11 +66,12 @@ export const BreedingTracker = () => {
 
   // Calculate standard calving date on AI date change (~283 days for cow, ~310 days for buffalo)
   const calculateCalvingDate = (aiDateStr, animalTag) => {
-    const animal = animals.find(a => a.tagNo === animalTag);
-    const isBuf = animal?.type === 'buffalo';
+    const animal = animals.find(a => (a.tagNo && a.tagNo === animalTag) || (a.tag_no && a.tag_no === animalTag) || a.name === animalTag);
+    const isBuf = animal?.type === 'buffalo' || animal?.type === 'buffalo_calf';
     const gestationDays = isBuf ? 310 : 283;
 
     const d = new Date(aiDateStr);
+    if (isNaN(d.getTime())) return '';
     d.setDate(d.getDate() + gestationDays);
     return d.toISOString().split('T')[0];
   };
@@ -84,7 +88,7 @@ export const BreedingTracker = () => {
 
   const handleOpenAdd = () => {
     setEditingRecord(null);
-    const defaultTag = femaleAnimalOptions[0]?.value || animals[0]?.tagNo || '';
+    const defaultTag = femaleAnimalOptions[0]?.value || animals[0]?.tagNo || animals[0]?.tag_no || '';
     const today = new Date().toISOString().split('T')[0];
     const initialCalving = calculateCalvingDate(today, defaultTag);
     setForm({
@@ -101,8 +105,8 @@ export const BreedingTracker = () => {
     setForm({
       animalId: rec.animalId || '',
       aiDate: rec.aiDate || new Date().toISOString().split('T')[0],
-      bullStrawTag: rec.bullStrawTag || '',
-      technicianName: rec.technicianName || '',
+      bullStrawTag: rec.bullStrawTag || rec.bullId || '',
+      technicianName: rec.technicianName || rec.technician || '',
       status: rec.status || (rec.isPregnant ? 'pregnant' : 'inseminated'),
       isPregnant: rec.isPregnant !== false,
       expectedCalvingDate: rec.expectedCalvingDate || calculateCalvingDate(rec.aiDate || new Date().toISOString().split('T')[0], rec.animalId),
@@ -123,8 +127,8 @@ export const BreedingTracker = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const animal = animals.find(a => a.tagNo === form.animalId);
-    const animalName = animal ? animal.name : (editingRecord?.animalName || 'Unknown');
+    const animal = animals.find(a => (a.tagNo && a.tagNo === form.animalId) || (a.tag_no && a.tag_no === form.animalId) || a.name === form.animalId);
+    const animalName = animal ? animal.name : (editingRecord?.animalName || 'मादा पशु');
     const calculatedCalving = form.expectedCalvingDate || calculateCalvingDate(form.aiDate, form.animalId);
 
     const recordData = {
@@ -168,8 +172,8 @@ export const BreedingTracker = () => {
     return (
       (rec.animalId || '').toLowerCase().includes(q) ||
       (rec.animalName || '').toLowerCase().includes(q) ||
-      (rec.bullStrawTag || '').toLowerCase().includes(q) ||
-      (rec.technicianName || '').toLowerCase().includes(q) ||
+      (rec.bullStrawTag || rec.bullId || '').toLowerCase().includes(q) ||
+      (rec.technicianName || rec.technician || '').toLowerCase().includes(q) ||
       (rec.notes || '').toLowerCase().includes(q) ||
       (rec.aiDate || '').toLowerCase().includes(q) ||
       (rec.expectedCalvingDate || '').toLowerCase().includes(q)
@@ -283,7 +287,7 @@ export const BreedingTracker = () => {
                       {getStatusBadge()}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      Semen Straw (सीमन स्ट्रॉ): <strong className="text-purple-700">{rec.bullStrawTag || 'N/A'}</strong>
+                      Semen Straw (सीमन स्ट्रॉ): <strong className="text-purple-700">{rec.bullStrawTag || rec.bullId || 'N/A'}</strong>
                     </p>
                   </div>
 
@@ -312,7 +316,7 @@ export const BreedingTracker = () => {
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 font-semibold block">Doctor / AI Worker (डॉक्टर)</span>
-                    <span className="text-slate-700">{rec.technicianName || 'डॉक्टर'}</span>
+                    <span className="text-slate-700">{rec.technicianName || rec.technician || 'डॉक्टर'}</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 font-semibold block">Days Remaining (शेष दिन)</span>
