@@ -111,6 +111,46 @@ export const AnimalList = ({ onNavigateSale }) => {
     }
   };
 
+  const getTypeBadge = (type) => {
+    switch (type) {
+      case 'buffalo':
+        return (
+          <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-md text-cyan-300 border border-cyan-500/40 text-[11px] font-extrabold shadow-sm flex items-center gap-1">
+            <span>🐃</span>
+            <span>Buffalo (भैंस)</span>
+          </span>
+        );
+      case 'cow':
+        return (
+          <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-md text-amber-300 border border-amber-500/40 text-[11px] font-extrabold shadow-sm flex items-center gap-1">
+            <span>🐄</span>
+            <span>Cow (गाय)</span>
+          </span>
+        );
+      case 'keda':
+        return (
+          <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-md text-blue-300 border border-blue-500/40 text-[11px] font-extrabold shadow-sm flex items-center gap-1">
+            <span>🐂</span>
+            <span>केड़ा (Keda)</span>
+          </span>
+        );
+      case 'kedi':
+      case 'heifer':
+        return (
+          <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-md text-teal-300 border border-teal-500/40 text-[11px] font-extrabold shadow-sm flex items-center gap-1">
+            <span>🐃</span>
+            <span>केडी (Kedi)</span>
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-md text-white border border-white/20 text-[11px] font-bold shadow-sm">
+            {type || 'पशु'}
+          </span>
+        );
+    }
+  };
+
   const getAnimalPhoto = (animal) => {
     if (animal.photo && !animal.photo.includes('photo-1570042225831-d98fa7577f1e') && !animal.photo.includes('photo-1546445317')) {
       return animal.photo;
@@ -153,20 +193,20 @@ export const AnimalList = ({ onNavigateSale }) => {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'milking':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">🥛 Milking (दुधारू)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-600 text-white border border-emerald-400 shadow-sm">🥛 Milking (दुधारू)</span>;
       case 'pregnant':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-300">🤰 Pregnant (गाभिन)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-purple-600 text-white border border-purple-400 shadow-sm">🤰 Pregnant (गाभिन)</span>;
       case 'dry':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">🌾 Dry (सूखी)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-600 text-white border border-amber-400 shadow-sm">🌾 Dry (सूखी)</span>;
       case 'sick':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 animate-pulse">🩺 Sick (बीमार)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white border border-rose-400 shadow-sm animate-pulse">🩺 Sick (बीमार)</span>;
       case 'keda':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300">🐂 केड़ा (Keda)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-blue-600 text-white border border-blue-400 shadow-sm">🐂 केड़ा (Keda)</span>;
       case 'kedi':
       case 'heifer':
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-100 text-teal-800 border border-teal-300">🐃 केडी (Kedi)</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-teal-600 text-white border border-teal-400 shadow-sm">🐃 केडी (Kedi)</span>;
       default:
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">{status}</span>;
+        return <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-white">{status}</span>;
     }
   };
 
@@ -373,37 +413,37 @@ export const AnimalList = ({ onNavigateSale }) => {
                     alt={animal.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
-                  <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 items-start max-w-[75%]">
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-900/80 backdrop-blur-md text-white text-xs font-bold font-mono">
-                      {animal.tagNo}
-                    </span>
-                    {isOwn ? (
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-bold shadow-sm">
-                        🏡 खुद की (Own)
+                  <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-none">
+                    <div className="flex flex-col gap-1 items-start min-w-0 max-w-[62%] pointer-events-auto">
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 backdrop-blur-md text-white text-xs font-bold font-mono truncate max-w-full shadow-sm" title={animal.tagNo}>
+                        {animal.tagNo}
                       </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-600 text-white text-[10px] font-bold shadow-sm">
-                        🛒 खरीदी (Purchased)
-                      </span>
-                    )}
-                    {animal.motherTag && (
-                      <span className="px-2 py-0.5 rounded-md bg-purple-700/90 backdrop-blur-md text-white text-[10px] font-bold shadow-sm truncate max-w-full">
-                        🤱 मां: {animal.motherName || animal.motherTag}
-                      </span>
-                    )}
-                    {calvesCount > 0 && (
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-700/90 backdrop-blur-md text-white text-[10px] font-bold shadow-sm">
-                        🍼 बच्चे: {calvesCount}
-                      </span>
-                    )}
-                  </div>
-                  <div className="absolute top-2.5 right-2.5">
-                    {getStatusBadge(animal.status)}
+                      {isOwn ? (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-bold shadow-sm whitespace-nowrap">
+                          🏡 खुद की (Own)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-amber-600 text-white text-[10px] font-bold shadow-sm whitespace-nowrap">
+                          🛒 खरीदी (Purchased)
+                        </span>
+                      )}
+                      {animal.motherTag && (
+                        <span className="px-2 py-0.5 rounded-md bg-purple-700/90 backdrop-blur-md text-white text-[10px] font-bold shadow-sm truncate max-w-full" title={`मां: ${animal.motherName || animal.motherTag}`}>
+                          🤱 मां: {animal.motherName || animal.motherTag}
+                        </span>
+                      )}
+                      {calvesCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-700/90 backdrop-blur-md text-white text-[10px] font-bold shadow-sm whitespace-nowrap">
+                          🍼 बच्चे: {calvesCount}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pointer-events-auto flex-shrink-0">
+                      {getStatusBadge(animal.status)}
+                    </div>
                   </div>
                   <div className="absolute bottom-2.5 left-2.5">
-                    <span className="px-2 py-0.5 rounded bg-white/90 backdrop-blur-md text-slate-800 text-[11px] font-semibold">
-                      {getTypeLabel(animal.type)}
-                    </span>
+                    {getTypeBadge(animal.type)}
                   </div>
                   <label
                     className="absolute bottom-2.5 right-2.5 px-2 py-1 rounded-lg bg-black/60 hover:bg-black/85 text-white backdrop-blur-md cursor-pointer transition-all shadow active:scale-95 flex items-center gap-1 border border-white/20"
