@@ -94,15 +94,34 @@ export const dbService = {
       // Check the latest 300 rows in Supabase
       const { data: recentSupabase, error } = await supabase
         .from('milk_deliveries')
-        .select('delivery_id, source_row')
+        .select('delivery_id, source_row, delivery_date, delivery_time, customer_name_original, milk_liters')
         .order('delivery_id', { ascending: false })
         .limit(300);
 
       if (error) return 0;
 
+      // 🧹 Auto-Deduplicator: Clean up any phantom duplicate deliveries with identical source_row
+      const seenSourceRows = new Map();
+      const duplicateIdsToDelete = [];
+      (recentSupabase || []).forEach(d => {
+        if (d.source_row) {
+          if (seenSourceRows.has(d.source_row)) {
+            // Already seen this row, keep the earlier ID and mark this duplicate for deletion
+            duplicateIdsToDelete.push(d.delivery_id);
+          } else {
+            seenSourceRows.set(d.source_row, d.delivery_id);
+          }
+        }
+      });
+
+      if (duplicateIdsToDelete.length > 0) {
+        console.log(`[Reconciler] Auto-cleaning ${duplicateIdsToDelete.length} duplicate deliveries:`, duplicateIdsToDelete);
+        await supabase.from('milk_deliveries').delete().in('delivery_id', duplicateIdsToDelete);
+      }
+
       const existingRowSet = new Set((recentSupabase || []).map(d => d.source_row).filter(Boolean));
-      const maxId = recentSupabase?.[0]?.delivery_id || 33870;
-      let nextId = maxId + 1;
+      const highestExistingId = (recentSupabase || []).reduce((max, r) => Math.max(max, r.delivery_id || 0), 34090);
+      let nextId = highestExistingId + 1;
 
       const missingRows = [];
       const checkFrom = Math.max(1, lines.length - 200);
