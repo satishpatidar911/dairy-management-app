@@ -91,89 +91,171 @@ export const dbService = {
       const lines = csv.split('\n');
       if (lines.length <= 1) return 0;
 
-      // Check the latest 300 rows in Supabase
+      // Cutoff date: reconcile today and yesterday (safe window of active edits)
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 1);
+      const cutoffIso = cutoffDate.toISOString().slice(0, 10);
+
+      // Check recent 250 rows from Sheet
+      const checkFrom = Math.max(1, lines.length - 250);
+      const sheetRows = [];
+
+      for (let i = checkFrom; i < lines.length; i++) {
+        const line = lines[i]?.trim();
+        if (!line) continue;
+        const rowNum = i + 1;
+
+        const regex = /(?:^|,)(?:"([^"]*)"|([^",]*))/g;
+        const cols = [];
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+          cols.push(match[1] !== undefined ? match[1] : match[2]);
+        }
+
+        const dateRaw = (cols[1] || '').trim();
+        let isoDate = dateRaw;
+        if (dateRaw.includes('-')) {
+          isoDate = dateRaw.slice(0, 10);
+        } else if (dateRaw.includes('/')) {
+          const parts = dateRaw.split(' ')[0].split('/');
+          if (parts.length === 3) {
+            isoDate = `${parts[2].padStart(4, '20')}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+          }
+        }
+
+        const timeRaw = (cols[2] || '').trim().toUpperCase();
+        const time = (timeRaw.includes('EV') || timeRaw.includes('शाम')) ? 'EVENING' : 'MORNING';
+        const name = (cols[3] || cols[4] || '').trim();
+        const qty = parseFloat(cols[5]) || 0;
+        const totalPay = parseFloat(cols[7]) || (qty * 70);
+
+        if (isoDate && isoDate >= cutoffIso && name) {
+          sheetRows.push({
+            rowNum,
+            isoDate,
+            time,
+            name,
+            qty,
+            totalPay
+          });
+        }
+      }
+
+      // Fetch recent deliveries from Supabase
       const { data: recentSupabase, error } = await supabase
         .from('milk_deliveries')
-        .select('delivery_id, source_row, delivery_date, delivery_time, customer_name_original, milk_liters')
+        .select('delivery_id, source_row, delivery_date, delivery_time, customer_name_original, milk_liters, bill_amount')
+        .gte('delivery_date', cutoffIso)
         .order('delivery_id', { ascending: false })
-        .limit(300);
+        .limit(400);
 
       if (error) return 0;
 
-      // 🧹 Auto-Deduplicator: Clean up any phantom duplicate deliveries with identical source_row
+      // Deduplicate any exact duplicate rows
       const seenSourceRows = new Map();
       const duplicateIdsToDelete = [];
       (recentSupabase || []).forEach(d => {
         if (d.source_row) {
           if (seenSourceRows.has(d.source_row)) {
-            // Already seen this row, keep the earlier ID and mark this duplicate for deletion
             duplicateIdsToDelete.push(d.delivery_id);
           } else {
             seenSourceRows.set(d.source_row, d.delivery_id);
           }
         }
       });
-
       if (duplicateIdsToDelete.length > 0) {
-        console.log(`[Reconciler] Auto-cleaning ${duplicateIdsToDelete.length} duplicate deliveries:`, duplicateIdsToDelete);
         await supabase.from('milk_deliveries').delete().in('delivery_id', duplicateIdsToDelete);
       }
 
-      const existingRowSet = new Set((recentSupabase || []).map(d => d.source_row).filter(Boolean));
-      const highestExistingId = (recentSupabase || []).reduce((max, r) => Math.max(max, r.delivery_id || 0), 34090);
+      const activeSupabase = (recentSupabase || []).filter(d => !duplicateIdsToDelete.includes(d.delivery_id));
+      const distinctDates = [...new Set(sheetRows.map(r => r.isoDate))];
+      const highestExistingId = activeSupabase.reduce((max, r) => Math.max(max, r.delivery_id || 0), 34150);
       let nextId = highestExistingId + 1;
 
-      const missingRows = [];
-      const checkFrom = Math.max(1, lines.length - 200);
+      let changeCount = 0;
 
-      for (let i = checkFrom; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const rowNum = i + 1;
+      for (const date of distinctDates) {
+        for (const shift of ['MORNING', 'EVENING']) {
+          const sShift = sheetRows.filter(r => r.isoDate === date && r.time === shift);
+          const dbShift = activeSupabase.filter(r => r.delivery_date === date && r.delivery_time === shift);
 
-        if (!existingRowSet.has(rowNum)) {
-          const regex = /(?:^|,)(?:"([^"]*)"|([^",]*))/g;
-          const cols = [];
-          let match;
-          while ((match = regex.exec(line)) !== null) {
-            cols.push(match[1] !== undefined ? match[1] : match[2]);
-          }
+          if (sShift.length === 0 && dbShift.length === 0) continue;
 
-          const dateRaw = (cols[1] || '').trim();
-          const time = (cols[2] || '').trim().toUpperCase();
-          const name = (cols[3] || cols[4] || '').trim();
-          const qty = parseFloat(cols[5]) || 0;
-          const totalPay = parseFloat(cols[7]) || (qty * 70);
+          const dbPool = [...dbShift];
+          const unmatchedSheet = [];
 
-          if (!dateRaw && !name && qty === 0) continue;
+          for (const sh of sShift) {
+            // Priority 1: Match by exact source_row + name
+            let matchIdx = dbPool.findIndex(db =>
+              db.source_row === sh.rowNum &&
+              db.customer_name_original?.trim().toLowerCase() === sh.name.toLowerCase()
+            );
 
-          let isoDate = dateRaw;
-          if (dateRaw.includes('/')) {
-            const parts = dateRaw.split('/');
-            if (parts.length === 3) {
-              isoDate = `${parts[2].padStart(4, '20')}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+            // Priority 2: Match by name + qty
+            if (matchIdx === -1) {
+              matchIdx = dbPool.findIndex(db =>
+                db.customer_name_original?.trim().toLowerCase() === sh.name.toLowerCase() &&
+                Math.abs((db.milk_liters || 0) - (sh.qty || 0)) < 0.01
+              );
+            }
+
+            // Priority 3: Match by name alone
+            if (matchIdx === -1) {
+              matchIdx = dbPool.findIndex(db =>
+                db.customer_name_original?.trim().toLowerCase() === sh.name.toLowerCase()
+              );
+            }
+
+            if (matchIdx > -1) {
+              const matchedDb = dbPool[matchIdx];
+              dbPool.splice(matchIdx, 1);
+
+              const qtyDiff = Math.abs((sh.qty || 0) - (matchedDb.milk_liters || 0));
+              const payDiff = Math.abs((sh.totalPay || 0) - (matchedDb.bill_amount || 0));
+              const rowDiff = sh.rowNum !== matchedDb.source_row;
+
+              if (qtyDiff > 0.01 || payDiff > 1 || rowDiff) {
+                await supabase.from('milk_deliveries').update({
+                  milk_liters: sh.qty,
+                  bill_amount: sh.totalPay,
+                  source_row: sh.rowNum
+                }).eq('delivery_id', matchedDb.delivery_id);
+                changeCount++;
+              }
+            } else {
+              unmatchedSheet.push(sh);
             }
           }
 
-          missingRows.push({
-            delivery_id: nextId++,
-            delivery_date: isoDate,
-            delivery_time: time.includes('EV') ? 'EVENING' : 'MORNING',
-            customer_name_original: name || 'ग्राहक',
-            milk_liters: qty,
-            bill_amount: totalPay,
-            source_row: rowNum,
-            source_timestamp: new Date().toISOString()
-          });
+          // Safely delete phantom rows deleted from Sheet
+          if (sShift.length > 0 && dbPool.length > 0 && dbPool.length <= 5) {
+            const deleteIds = dbPool.map(d => d.delivery_id);
+            await supabase.from('milk_deliveries').delete().in('delivery_id', deleteIds);
+            changeCount += deleteIds.length;
+          }
+
+          // Insert new rows added in Sheet
+          if (unmatchedSheet.length > 0) {
+            const newRows = unmatchedSheet.map(sh => ({
+              delivery_id: nextId++,
+              delivery_date: sh.isoDate,
+              delivery_time: sh.time,
+              customer_name_original: sh.name,
+              milk_liters: sh.qty,
+              bill_amount: sh.totalPay,
+              source_row: sh.rowNum,
+              source_timestamp: new Date().toISOString()
+            }));
+            await supabase.from('milk_deliveries').insert(newRows);
+            changeCount += newRows.length;
+          }
         }
       }
 
-      if (missingRows.length > 0) {
-        console.log(`[Reconciler] Auto-syncing ${missingRows.length} missing rows from Google Sheet to Supabase...`);
-        await supabase.from('milk_deliveries').insert(missingRows);
-        return missingRows.length;
+      if (changeCount > 0) {
+        console.log(`[Reconciler] Auto-reconciliation completed with ${changeCount} changes.`);
       }
-      return 0;
+      return changeCount;
     } catch (err) {
       console.warn('Google Sheet reconciliation warning:', err);
       return 0;
