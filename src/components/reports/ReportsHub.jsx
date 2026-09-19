@@ -12,7 +12,8 @@ import {
   Trophy,
   Search,
   X,
-  Award
+  Award,
+  CreditCard
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
