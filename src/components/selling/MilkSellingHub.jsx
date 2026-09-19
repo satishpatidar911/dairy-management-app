@@ -738,6 +738,50 @@ export const MilkSellingHub = () => {
     );
   }, [filteredCustomerSales]);
 
+  const customerDaysCount = useMemo(() => {
+    const dates = new Set(filteredCustomerSales.map(s => s.date).filter(Boolean));
+    return dates.size || 1;
+  }, [filteredCustomerSales]);
+
+  const customerAvgDailyLiters = useMemo(() => {
+    return Number((customerTotalLiters / customerDaysCount).toFixed(2));
+  }, [customerTotalLiters, customerDaysCount]);
+
+  const customerGrandTotals = useMemo(() => {
+    let totalQty = 0;
+    let totalAmt = 0;
+    filteredCustomerSales.forEach(s => {
+      totalQty += Number(s.quantity || s.liters || 0);
+      totalAmt += Number(s.amount || ((s.quantity || s.liters || 0) * (s.rate || 70)));
+    });
+    const avgRate = totalQty > 0 ? (totalAmt / totalQty) : 70;
+    return {
+      count: filteredCustomerSales.length,
+      totalQty,
+      totalAmt,
+      avgRate,
+      distinctDays: customerDaysCount,
+      avgDailyLiters: customerAvgDailyLiters
+    };
+  }, [filteredCustomerSales, customerDaysCount, customerAvgDailyLiters]);
+
+  const customerPageTotals = useMemo(() => {
+    let totalQty = 0;
+    let totalAmt = 0;
+    paginatedCustomerSales.forEach(s => {
+      totalQty += Number(s.quantity || s.liters || 0);
+      totalAmt += Number(s.amount || ((s.quantity || s.liters || 0) * (s.rate || 70)));
+    });
+    const avgRate = totalQty > 0 ? (totalAmt / totalQty) : 70;
+    return {
+      count: paginatedCustomerSales.length,
+      totalQty,
+      totalAmt,
+      avgRate
+    };
+  }, [paginatedCustomerSales]);
+
+
   return (
     <div className="space-y-5 pb-12 max-w-7xl mx-auto">
       {/* 🌟 1. Top Modern Header & Navigation */}
@@ -2081,6 +2125,9 @@ export const MilkSellingHub = () => {
                 <span className="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-900 text-xs font-black border border-blue-200 shadow-xs">
                   🥛 कुल: {customerTotalLiters} L (₹{customerTotalAmount.toLocaleString('en-IN')})
                 </span>
+                <span className="px-2.5 py-1.5 rounded-xl bg-teal-50 text-teal-900 text-xs font-bold border border-teal-200 shadow-xs">
+                  📊 औसत: <strong className="font-black text-teal-950">{customerAvgDailyLiters} L/दिन</strong> ({customerDaysCount} दिन)
+                </span>
                 <span className="px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 shadow-xs">
                   💰 औसत दर: <strong className="font-black text-emerald-950">₹{customerTotalLiters > 0 ? (customerTotalAmount / customerTotalLiters).toFixed(2) : 70}/L</strong>
                 </span>
@@ -2226,7 +2273,12 @@ export const MilkSellingHub = () => {
                         {customerGrandTotals.count} ग्राहक प्रविष्टियां
                       </td>
                       <td className="p-3 text-right font-black text-indigo-950 text-sm whitespace-nowrap">
-                        {customerGrandTotals.totalQty.toFixed(1)} L
+                        <div>{customerGrandTotals.totalQty.toFixed(1)} L</div>
+                        {customerGrandTotals.distinctDays > 1 && (
+                          <div className="text-[10px] font-bold text-teal-700">
+                            ({customerGrandTotals.avgDailyLiters} L/दिन)
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-right font-black text-indigo-950 text-xs whitespace-nowrap">
                         औसत ₹{customerGrandTotals.avgRate.toFixed(2)}

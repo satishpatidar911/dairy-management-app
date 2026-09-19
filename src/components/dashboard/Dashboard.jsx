@@ -712,6 +712,22 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     return Number((periodCustomerLiters / days).toFixed(2));
   }, [filterMode, periodCustomerLiters, activeRange, currentMonthStats]);
 
+  const displayDailyAvgCustomerLiters = useMemo(() => {
+    if (customerFilter && activeCustomerStats) {
+      const days = activeRange.daysCount || Math.max(1, Math.ceil((new Date(activeRange.end) - new Date(activeRange.start)) / 86400000) + 1);
+      return days > 0 ? Number((activeCustomerStats.totalLiters / days).toFixed(2)) : activeCustomerStats.totalLiters;
+    }
+    return periodDailyAvgCustomerLiters;
+  }, [customerFilter, activeCustomerStats, activeRange, periodDailyAvgCustomerLiters]);
+
+  const displayDailyAvgCustomerAmount = useMemo(() => {
+    if (customerFilter && activeCustomerStats) {
+      const days = activeRange.daysCount || Math.max(1, Math.ceil((new Date(activeRange.end) - new Date(activeRange.start)) / 86400000) + 1);
+      return days > 0 ? Number((activeCustomerStats.totalAmount / days).toFixed(2)) : activeCustomerStats.totalAmount;
+    }
+    return periodDailyAvgCustomerAmount;
+  }, [customerFilter, activeCustomerStats, activeRange, periodDailyAvgCustomerAmount]);
+
   const periodDairyTotal = useMemo(() => {
     return filteredDairySales.reduce((sum, r) => sum + Number(r.totalAmount || r.amount || ((r.quantity || r.liters || 0) * (r.rate || 42))), 0);
   }, [filteredDairySales]);
@@ -1336,9 +1352,9 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
               label={customerFilter ? `👥 ${customerFilter} (बिक्री)` : "👥 Customer Sale"}
               value={fmt(displayCustAmount)}
               sub={
-                activeRange.daysCount && activeRange.daysCount > 1
-                  ? `औसत दर: ₹${displayCustAvgRate}/L · दैनिक औसत: ${fmt(periodDailyAvgCustomerAmount)}/दिन`
-                  : `औसत दर: ₹${displayCustAvgRate}/L (खुदरा ग्राहक बिक्री)`
+                filterMode === "today"
+                  ? `कुल: ${displayCustLiters} L · औसत दर: ₹${displayCustAvgRate}/L`
+                  : `औसत: ${displayDailyAvgCustomerLiters} L/दिन (${activeRange.daysCount ? `${activeRange.daysCount} दिन का औसत` : activeRange.label})`
               }
               trail={
                 <div className="space-y-1 w-full">
@@ -1347,10 +1363,10 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
                     <span>+</span>
                     <span>🌇 शाम: <strong>{displayCustEveningLiters} L</strong></span>
                     <span>=</span>
-                    <span>🥛 कुल दूध: <strong>{displayCustLiters} L</strong></span>
+                    <span>🥛 कुल दूध: <strong>{displayCustLiters} L</strong> <span className="opacity-90 font-bold">({displayDailyAvgCustomerLiters} L/दिन)</span></span>
                   </div>
                   <div className={`text-[10px] font-bold flex items-center justify-between ${isDark ? "text-amber-200" : "text-amber-900"}`}>
-                    <span>💰 औसत दर: <strong>₹{displayCustAvgRate} / L</strong></span>
+                    <span>💰 औसत दर: <strong>₹{displayCustAvgRate} / L</strong> · दैनिक: <strong>{fmt(displayDailyAvgCustomerAmount)}/दिन</strong></span>
                     <span className="opacity-80">{customerFilter ? `चयनित ग्राहक` : `${customerFilteredSales.length} प्रविष्टियां`}</span>
                   </div>
                 </div>
@@ -1950,6 +1966,8 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
                 <span className="text-indigo-500 font-extrabold">🌇 {activeCustomerStats ? activeCustomerStats.eveningLiters : periodCustomerEveningLiters} L</span>
                 <span>=</span>
                 <span className="text-emerald-500 font-extrabold">🥛 कुल: {activeCustomerStats ? activeCustomerStats.totalLiters : periodCustomerLiters} L</span>
+                <span className="hidden sm:inline opacity-40">•</span>
+                <span className="text-cyan-400 font-extrabold">📊 औसत: {displayDailyAvgCustomerLiters} L/दिन</span>
                 <span className="hidden sm:inline opacity-40">•</span>
                 <span className="text-amber-400 font-extrabold">💰 औसत दर: ₹{displayCustAvgRate}/L</span>
               </div>
