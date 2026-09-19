@@ -13,7 +13,8 @@ import {
   Search,
   X,
   Award,
-  CreditCard
+  CreditCard,
+  Building2
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
@@ -21,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 
 import { MonthWiseConclusionTable } from './MonthWiseConclusionTable';
 import { CustomerDueMatrixReport } from './CustomerDueMatrixReport';
+import { DairyPlantReport } from './DairyPlantReport';
 
 export const ReportsHub = () => {
   const { t } = useLanguage();
@@ -209,7 +211,7 @@ export const ReportsHub = () => {
       </div>
 
       {/* Report Selector Tabs (Hidden on Print) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 no-print print:hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 no-print print:hidden">
         <button
           onClick={() => setReportType('customer_due_matrix')}
           className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
@@ -221,6 +223,19 @@ export const ReportsHub = () => {
           <CreditCard className="w-5 h-5 mb-1.5" />
           <h4 className="font-bold text-xs">Customer Due Matrix</h4>
           <p className="text-[10px] mt-0.5 opacity-80 font-medium">माहवार बकाया (Due Report)</p>
+        </button>
+
+        <button
+          onClick={() => setReportType('dairy_plant_report')}
+          className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+            reportType === 'dairy_plant_report'
+              ? 'option-active-light'
+              : 'option-inactive-dark'
+          }`}
+        >
+          <Building2 className="w-5 h-5 mb-1.5 text-blue-600" />
+          <h4 className="font-bold text-xs">Harihar Dairy (प्लांट)</h4>
+          <p className="text-[10px] mt-0.5 opacity-80 font-medium">तारीख-वार बिल व स्टेटमेंट</p>
         </button>
 
         <button
@@ -292,6 +307,8 @@ export const ReportsHub = () => {
       {/* REPORT CONTENT AREA */}
       {reportType === 'customer_due_matrix' ? (
         <CustomerDueMatrixReport />
+      ) : reportType === 'dairy_plant_report' ? (
+        <DairyPlantReport initialPlant="HARIHAR DAIRY" />
       ) : reportType === 'month_conclusion' ? (
         <MonthWiseConclusionTable />
       ) : (

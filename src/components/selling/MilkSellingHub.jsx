@@ -27,12 +27,14 @@ import {
   Settings,
   Edit2,
   Save,
-  Pencil
+  Pencil,
+  Download
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleFormSyncModal } from '../customers/GoogleFormSyncModal';
+import { DairyPlantReport } from '../reports/DairyPlantReport';
 
 export const MilkSellingHub = () => {
   const { t } = useLanguage();
@@ -480,16 +482,29 @@ export const MilkSellingHub = () => {
   }, []);
 
   // Dairy Sales Filter & Pagination State
+  const [dairyPlantFilter, setDairyPlantFilter] = useState('all');
   const [dairyMonthFilter, setDairyMonthFilter] = useState('all');
+  const [dairyStartDate, setDairyStartDate] = useState('');
+  const [dairyEndDate, setDairyEndDate] = useState('');
   const [dairySearch, setDairySearch] = useState('');
   const [dairyShiftFilter, setDairyShiftFilter] = useState('all');
   const [dairyPage, setDairyPage] = useState(1);
+  const [isDateToDateReportOpen, setIsDateToDateReportOpen] = useState(false);
   const dairyItemsPerPage = 30;
 
   // Customer Sales Filter & Pagination State
   const [customerMonthFilter, setCustomerMonthFilter] = useState('all');
   const [customerPage, setCustomerPage] = useState(1);
   const customerItemsPerPage = 30;
+
+  // Available Unique Dairy Plants
+  const availableDairyPlants = useMemo(() => {
+    const s = new Set();
+    dairyCenters?.forEach(c => { if (c.name) s.add(c.name); });
+    dairySales?.forEach(d => { if (d.dairyName) s.add(d.dairyName); });
+    if (s.size === 0) s.add('HARIHAR DAIRY');
+    return Array.from(s).sort();
+  }, [dairyCenters, dairySales]);
 
   // Available Dairy Sales Months
   const availableDairyMonths = useMemo(() => {
@@ -509,24 +524,78 @@ export const MilkSellingHub = () => {
     return Array.from(s).sort().reverse();
   }, [customerSales]);
 
+  // Quick Preset Billing Cycles for Dairy Sales (Date to Date)
+  const handleSetDairyDateCycle = (cycle) => {
+    const today = new Date();
+    const curYear = today.getFullYear();
+    const curMonthNum = today.getMonth() + 1; // 1-12
+    let ym = `${curYear}-${String(curMonthNum).padStart(2, '0')}`;
+    if (dairyMonthFilter && dairyMonthFilter !== 'all' && dairyMonthFilter.includes('-')) {
+      ym = dairyMonthFilter;
+    }
+    const [y, m] = ym.split('-');
+    const daysInMonth = new Date(parseInt(y, 10), parseInt(m, 10), 0).getDate();
+
+    if (cycle === '1-10') {
+      setDairyStartDate(`${ym}-01`);
+      setDairyEndDate(`${ym}-10`);
+    } else if (cycle === '11-20') {
+      setDairyStartDate(`${ym}-11`);
+      setDairyEndDate(`${ym}-20`);
+    } else if (cycle === '21-end') {
+      setDairyStartDate(`${ym}-21`);
+      setDairyEndDate(`${ym}-${String(daysInMonth).padStart(2, '0')}`);
+    } else if (cycle === 'month') {
+      setDairyStartDate(`${ym}-01`);
+      setDairyEndDate(`${ym}-${String(daysInMonth).padStart(2, '0')}`);
+    } else if (cycle === 'today') {
+      const todayIso = today.toISOString().split('T')[0];
+      setDairyStartDate(todayIso);
+      setDairyEndDate(todayIso);
+    } else if (cycle === 'all') {
+      setDairyStartDate('');
+      setDairyEndDate('');
+      setDairyMonthFilter('all');
+      setDairyPlantFilter('all');
+      setDairyShiftFilter('all');
+      setDairySearch('');
+    }
+    setDairyPage(1);
+  };
+
   // Sorted and Filtered Dairy Sales (Latest Date First)
   const filteredDairySales = useMemo(() => {
     return dairySales
       .filter(s => {
-        const matchesMonth = dairyMonthFilter === 'all' || (s.date && s.date.startsWith(dairyMonthFilter));
+        // Plant Filter
+        if (dairyPlantFilter !== 'all') {
+          if ((s.dairyName || '').trim().toLowerCase() !== dairyPlantFilter.trim().toLowerCase()) {
+            return false;
+          }
+        }
+        // Date-to-Date Range Filter
+        if (dairyStartDate && s.date < dairyStartDate) return false;
+        if (dairyEndDate && s.date > dairyEndDate) return false;
+        if (!dairyStartDate && !dairyEndDate && dairyMonthFilter !== 'all') {
+          if (!s.date || !s.date.startsWith(dairyMonthFilter)) return false;
+        }
+        // Search Filter
         const matchesSearch = !dairySearch ||
           (s.dairyName && s.dairyName.toLowerCase().includes(dairySearch.toLowerCase())) ||
           (s.date && s.date.includes(dairySearch)) ||
           (s.slipNo && s.slipNo.toLowerCase().includes(dairySearch.toLowerCase()));
+        if (!matchesSearch) return false;
+        // Shift Filter
         const matchesShift = dairyShiftFilter === 'all' || s.shift === dairyShiftFilter;
-        return matchesMonth && matchesSearch && matchesShift;
+        if (!matchesShift) return false;
+        return true;
       })
       .sort((a, b) => {
         const dDiff = (b.date || '') > (a.date || '') ? 1 : ((b.date || '') < (a.date || '') ? -1 : 0);
         if (dDiff !== 0) return dDiff;
         return (b.createdAt || '') > (a.createdAt || '') ? 1 : ((b.createdAt || '') < (a.createdAt || '') ? -1 : 0);
       });
-  }, [dairySales, dairyMonthFilter, dairySearch, dairyShiftFilter]);
+  }, [dairySales, dairyPlantFilter, dairyStartDate, dairyEndDate, dairyMonthFilter, dairySearch, dairyShiftFilter]);
 
   const paginatedDairySales = useMemo(() => {
     const start = (dairyPage - 1) * dairyItemsPerPage;
@@ -534,6 +603,75 @@ export const MilkSellingHub = () => {
   }, [filteredDairySales, dairyPage]);
 
   const totalDairyPages = Math.max(1, Math.ceil(filteredDairySales.length / dairyItemsPerPage));
+
+  // Grand Totals across ALL filtered dairy sales
+  const dairyGrandTotals = useMemo(() => {
+    let totalQty = 0;
+    let totalAmt = 0;
+    let totalFatPoints = 0;
+    let morningQty = 0;
+    let eveningQty = 0;
+    let morningAmt = 0;
+    let eveningAmt = 0;
+
+    filteredDairySales.forEach(s => {
+      const q = Number(s.quantity) || 0;
+      const a = Number(s.totalAmount) || 0;
+      const f = Number(s.fat) || 0;
+      totalQty += q;
+      totalAmt += a;
+      totalFatPoints += (q * f);
+      if (s.shift === 'morning') {
+        morningQty += q;
+        morningAmt += a;
+      } else {
+        eveningQty += q;
+        eveningAmt += a;
+      }
+    });
+
+    const weightedAvgFat = totalQty > 0 ? (totalFatPoints / totalQty) : 0;
+    const avgRate = totalQty > 0 ? (totalAmt / totalQty) : 0;
+
+    return {
+      count: filteredDairySales.length,
+      totalQty,
+      totalAmt,
+      weightedAvgFat,
+      avgRate,
+      morningQty,
+      eveningQty,
+      morningAmt,
+      eveningAmt
+    };
+  }, [filteredDairySales]);
+
+  // Page Totals for current page
+  const dairyPageTotals = useMemo(() => {
+    let totalQty = 0;
+    let totalAmt = 0;
+    let totalFatPoints = 0;
+
+    paginatedDairySales.forEach(s => {
+      const q = Number(s.quantity) || 0;
+      const a = Number(s.totalAmount) || 0;
+      const f = Number(s.fat) || 0;
+      totalQty += q;
+      totalAmt += a;
+      totalFatPoints += (q * f);
+    });
+
+    const weightedAvgFat = totalQty > 0 ? (totalFatPoints / totalQty) : 0;
+    const avgRate = totalQty > 0 ? (totalAmt / totalQty) : 0;
+
+    return {
+      count: paginatedDairySales.length,
+      totalQty,
+      totalAmt,
+      weightedAvgFat,
+      avgRate
+    };
+  }, [paginatedDairySales]);
 
   // Sorted and Filtered Customer Sales (Latest Date First)
   const filteredCustomerSales = useMemo(() => {
@@ -1057,67 +1195,164 @@ export const MilkSellingHub = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div>
                   <h3 className="font-extrabold text-base sm:text-lg text-slate-900">
-                    डेयरी प्लांट बिक्री रिकॉर्ड ({filteredDairySales.length} प्रविष्टियां)
+                    डेयरी प्लांट बिक्री रिकॉर्ड ({dairyGrandTotals.count} प्रविष्टियां)
                   </h3>
-                  <p className="text-xs text-slate-500">प्लांट सप्लाई का संपूर्ण इतिहास, पर्ची एवं माह-वार विवरण</p>
+                  <p className="text-xs text-slate-500">
+                    प्लांट: <strong className="text-indigo-700">{dairyPlantFilter === 'all' ? 'सभी प्लांट (All Dairies)' : dairyPlantFilter}</strong>
+                    {dairyStartDate ? ` | अवधि: ${dairyStartDate} से ${dairyEndDate || 'आज तक'}` : ''}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-800 text-xs font-black border border-indigo-200">
-                    चयनित कुल: {filteredDairySales.reduce((a, b) => a + Number(b.quantity || 0), 0).toFixed(1)} L (₹{filteredDairySales.reduce((a, b) => a + Number(b.totalAmount || 0), 0).toLocaleString('en-IN')})
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-900 text-xs font-black border border-indigo-200 shadow-sm">
+                    चयनित कुल: {dairyGrandTotals.totalQty.toFixed(1)} L (₹{dairyGrandTotals.totalAmt.toLocaleString('en-IN')})
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsDateToDateReportOpen(true)}
+                    className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                    title="तारीख-वार आधिकारिक रिपोर्ट / बिल प्रिंट करें"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>📄 तारीख-वार बिल/रिपोर्ट (Date to Date)</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Dairy Sales Filters Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="सर्च प्लांट / पर्ची नं..."
-                    value={dairySearch}
-                    onChange={(e) => { setDairySearch(e.target.value); setDairyPage(1); }}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white outline-none"
-                  />
+              {/* Dairy Sales Filters Bar with Date to Date & Plant Selector */}
+              <div className="space-y-2 mt-3 p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                {/* Row 1: Search, Plant, Month, Shift */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="सर्च प्लांट / पर्ची नं..."
+                      value={dairySearch}
+                      onChange={(e) => { setDairySearch(e.target.value); setDairyPage(1); }}
+                      className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white outline-none"
+                    />
+                  </div>
+
+                  {/* Dairy Plant Selector */}
+                  <select
+                    value={dairyPlantFilter}
+                    onChange={(e) => { setDairyPlantFilter(e.target.value); setDairyPage(1); }}
+                    className="px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-bold text-slate-800 outline-none"
+                  >
+                    <option value="all">🏢 सभी डेयरी प्लांट (All Dairies)</option>
+                    {availableDairyPlants.map(p => (
+                      <option key={p} value={p}>🏢 {p}</option>
+                    ))}
+                  </select>
+
+                  {/* Month Dropdown */}
+                  <select
+                    value={dairyMonthFilter}
+                    onChange={(e) => { setDairyMonthFilter(e.target.value); setDairyPage(1); }}
+                    className="px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-bold text-slate-800 outline-none"
+                  >
+                    <option value="all">📅 सभी महीने (All Months)</option>
+                    {availableDairyMonths.map(m => (
+                      <option key={m} value={m}>{m} ({m.startsWith('2026-09') ? 'September 2026' : m.startsWith('2026-08') ? 'August 2026' : m})</option>
+                    ))}
+                  </select>
+
+                  {/* Shift Dropdown */}
+                  <select
+                    value={dairyShiftFilter}
+                    onChange={(e) => { setDairyShiftFilter(e.target.value); setDairyPage(1); }}
+                    className="px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-bold text-slate-800 outline-none"
+                  >
+                    <option value="all">🌅/🌇 सभी शिफ्ट (Morning + Evening)</option>
+                    <option value="morning">🌅 केवल सुबह (Morning)</option>
+                    <option value="evening">🌇 केवल शाम (Evening)</option>
+                  </select>
                 </div>
 
-                <select
-                  value={dairyMonthFilter}
-                  onChange={(e) => { setDairyMonthFilter(e.target.value); setDairyPage(1); }}
-                  className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-bold"
-                >
-                  <option value="all">📅 सभी महीने (All Months)</option>
-                  {availableDairyMonths.map(m => (
-                    <option key={m} value={m}>{m} ({m.startsWith('2026-09') ? 'September 2026' : m.startsWith('2026-08') ? 'August 2026' : m})</option>
-                  ))}
-                </select>
+                {/* Row 2: Date to Date Pickers & 10-Day Cycle Presets */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-500">📅 से (From):</span>
+                      <input
+                        type="date"
+                        value={dairyStartDate}
+                        onChange={(e) => { setDairyStartDate(e.target.value); setDairyPage(1); }}
+                        className="text-xs font-semibold bg-transparent outline-none cursor-pointer"
+                      />
+                    </div>
 
-                <select
-                  value={dairyShiftFilter}
-                  onChange={(e) => { setDairyShiftFilter(e.target.value); setDairyPage(1); }}
-                  className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-bold"
-                >
-                  <option value="all">🌅/🌇 सभी शिफ्ट</option>
-                  <option value="morning">🌅 Morning</option>
-                  <option value="evening">🌇 Evening</option>
-                </select>
+                    <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-500">📅 तक (To):</span>
+                      <input
+                        type="date"
+                        value={dairyEndDate}
+                        onChange={(e) => { setDairyEndDate(e.target.value); setDairyPage(1); }}
+                        className="text-xs font-semibold bg-transparent outline-none cursor-pointer"
+                      />
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const buf = Number(rateMasterConfig.buffaloFatRate) || 9.40;
-                    const cow = Number(rateMasterConfig.cowFatRate) || 8.50;
-                    const count = recalculateDairySalesWithMasterRate(rateMasterConfig);
-                    setSuccessMsg(`✓ सभी ${count} प्रविष्टियाँ मास्टर दर (भैंस: ₹${buf}/FAT, गाय: ₹${cow}/FAT) से अपडेट हो गईं!`);
-                    setTimeout(() => setSuccessMsg(''), 4000);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-sm"
-                  title="सभी प्रविष्टियों को सक्रिय मास्टर फैट दर से तुरंत री-कैलकुलेट करें"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>🔄 मास्टर रेट (₹{rateMasterConfig.buffaloFatRate || 9.40}/FAT) से अपडेट करें</span>
-                </button>
+                    {(dairyStartDate || dairyEndDate) && (
+                      <button
+                        type="button"
+                        onClick={() => { setDairyStartDate(''); setDairyEndDate(''); setDairyPage(1); }}
+                        className="px-2 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                        title="तारीख फ़िल्टर हटाएं"
+                      >
+                        ✖ रीसेट
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Cycle Shortcuts */}
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">चक्र:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDairyDateCycle('1-10')}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 transition-colors cursor-pointer"
+                    >
+                      1-10
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDairyDateCycle('11-20')}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 transition-colors cursor-pointer"
+                    >
+                      11-20
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDairyDateCycle('21-end')}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 transition-colors cursor-pointer"
+                    >
+                      21-अंत
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDairyDateCycle('month')}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors cursor-pointer"
+                    >
+                      पूरा महीना
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const buf = Number(rateMasterConfig.buffaloFatRate) || 9.40;
+                        const cow = Number(rateMasterConfig.cowFatRate) || 8.50;
+                        const count = recalculateDairySalesWithMasterRate(rateMasterConfig);
+                        setSuccessMsg(`✓ सभी ${count} प्रविष्टियाँ मास्टर दर (भैंस: ₹${buf}/FAT, गाय: ₹${cow}/FAT) से अपडेट हो गईं!`);
+                        setTimeout(() => setSuccessMsg(''), 4000);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap shadow-sm ml-1"
+                      title="मास्टर फैट दर से री-कैलकुलेट करें"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-600" />
+                      <span>मास्टर रेट (₹{rateMasterConfig.buffaloFatRate || 9.40})</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Sales Table */}
@@ -1213,6 +1448,54 @@ export const MilkSellingHub = () => {
                       ))
                     )}
                   </tbody>
+
+                  {/* GRAND TOTAL IN TFOOT */}
+                  <tfoot className="bg-indigo-50/95 text-slate-900 font-bold border-t-2 border-indigo-300 sticky bottom-0 z-10 shadow-md">
+                    {totalDairyPages > 1 && (
+                      <tr className="bg-slate-100/90 text-slate-600 text-[11px] border-b border-slate-200">
+                        <td className="p-2.5 font-bold">📄 इस पृष्ठ का योग (P.{dairyPage}):</td>
+                        <td className="p-2.5 text-slate-500 font-normal">{paginatedDairySales.length} प्रविष्टियां</td>
+                        <td className="p-2.5 text-right font-black text-slate-900">{dairyPageTotals.totalQty.toFixed(1)} L</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-blue-700">{dairyPageTotals.weightedAvgFat.toFixed(2)}% FAT</td>
+                        <td className="p-2.5 text-right font-bold">₹{dairyPageTotals.avgRate.toFixed(2)}</td>
+                        <td className="p-2.5 text-right font-black text-emerald-700">₹{dairyPageTotals.totalAmt.toLocaleString('en-IN')}</td>
+                        <td className="p-2.5"></td>
+                      </tr>
+                    )}
+                    <tr className="bg-indigo-50 text-indigo-950 text-xs sm:text-sm">
+                      <td className="p-3 font-black flex items-center gap-1">
+                        <span>📊 कुल महायोग (Grand Total)</span>
+                      </td>
+                      <td className="p-3 font-bold text-indigo-800">
+                        {dairyPlantFilter === 'all' ? 'सभी प्लांट' : dairyPlantFilter} ({dairyGrandTotals.count} प्रविष्टियां)
+                      </td>
+                      <td className="p-3 text-right font-black text-indigo-950 text-sm whitespace-nowrap">
+                        {dairyGrandTotals.totalQty.toFixed(1)} L
+                      </td>
+                      <td className="p-3 text-center font-mono font-black text-blue-900 text-xs whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded bg-blue-100 border border-blue-200">
+                          {dairyGrandTotals.weightedAvgFat.toFixed(2)}% FAT
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-black text-indigo-950 text-xs whitespace-nowrap">
+                        ₹{dairyGrandTotals.avgRate.toFixed(2)}/L
+                      </td>
+                      <td className="p-3 text-right font-black text-emerald-800 text-sm sm:text-base whitespace-nowrap">
+                        ₹{dairyGrandTotals.totalAmt.toLocaleString('en-IN')}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setIsDateToDateReportOpen(true)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 transition-all shadow cursor-pointer whitespace-nowrap"
+                          title="तारीख-वार बिल व चालान रिपोर्ट खोलें"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>बिल प्रिंट</span>
+                        </button>
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 
@@ -1922,7 +2205,39 @@ export const MilkSellingHub = () => {
                     ))
                   )}
                 </tbody>
-              </table>
+
+                  {/* CUSTOMER SALES GRAND TOTAL IN TFOOT */}
+                  <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300 sticky bottom-0 z-10 shadow-md">
+                    {totalCustomerPages > 1 && (
+                      <tr className="bg-slate-100/90 text-slate-600 text-[11px] border-b border-slate-200">
+                        <td className="p-2.5 font-bold">📄 इस पृष्ठ का योग (P.{customerPage}):</td>
+                        <td className="p-2.5 text-slate-500 font-normal">{paginatedCustomerSales.length} प्रविष्टियां</td>
+                        <td className="p-2.5 text-right font-black text-slate-900">{customerPageTotals.totalQty.toFixed(1)} L</td>
+                        <td className="p-2.5 text-right font-bold">₹{customerPageTotals.avgRate.toFixed(2)}</td>
+                        <td className="p-2.5 text-right font-black text-emerald-700">₹{customerPageTotals.totalAmt.toLocaleString('en-IN')}</td>
+                        <td colSpan="2" className="p-2.5"></td>
+                      </tr>
+                    )}
+                    <tr className="bg-indigo-50 text-indigo-950 text-xs sm:text-sm">
+                      <td className="p-3 font-black">
+                        <span>📊 कुल महायोग (Grand Total)</span>
+                      </td>
+                      <td className="p-3 font-bold text-indigo-800">
+                        {customerGrandTotals.count} ग्राहक प्रविष्टियां
+                      </td>
+                      <td className="p-3 text-right font-black text-indigo-950 text-sm whitespace-nowrap">
+                        {customerGrandTotals.totalQty.toFixed(1)} L
+                      </td>
+                      <td className="p-3 text-right font-black text-indigo-950 text-xs whitespace-nowrap">
+                        औसत ₹{customerGrandTotals.avgRate.toFixed(2)}
+                      </td>
+                      <td className="p-3 text-right font-black text-emerald-800 text-sm sm:text-base whitespace-nowrap">
+                        ₹{customerGrandTotals.totalAmt.toLocaleString('en-IN')}
+                      </td>
+                      <td colSpan="2" className="p-3"></td>
+                    </tr>
+                  </tfoot>
+                </table>
             </div>
 
             {/* Customer Sales Pagination Controls */}
@@ -2429,6 +2744,50 @@ export const MilkSellingHub = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Harihar Dairy Date-to-Date Report & Billing Modal */}
+      {isDateToDateReportOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-6xl rounded-3xl p-4 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 my-auto max-h-[96vh] flex flex-col justify-between animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 no-print">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-400">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>{dairyPlantFilter === 'all' ? 'HARIHAR DAIRY' : dairyPlantFilter} — तारीख-वार बिल व चालान रिपोर्ट</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 text-xs font-bold">
+                      Official Statement
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">तारीख से तारीख आपूर्ति विवरण, औसत फैट, दर व कुल देय राशि</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDateToDateReportOpen(false)}
+                className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-3">
+              <DairyPlantReport initialPlant={dairyPlantFilter === 'all' ? 'HARIHAR DAIRY' : dairyPlantFilter} />
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 no-print">
+              <button
+                type="button"
+                onClick={() => setIsDateToDateReportOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs cursor-pointer"
+              >
+                बंद करें (Close)
+              </button>
+            </div>
           </div>
         </div>
       )}
