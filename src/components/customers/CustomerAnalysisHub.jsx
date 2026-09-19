@@ -35,6 +35,7 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 
 import { MonthWiseConclusionTable } from '../reports/MonthWiseConclusionTable';
+import { CustomerDueMatrixReport } from '../reports/CustomerDueMatrixReport';
 import { CustomerLedgerModal } from './CustomerLedgerModal';
 
 export const CustomerAnalysisHub = ({ preselectedCustomerId = null, onNavigate }) => {
@@ -42,7 +43,7 @@ export const CustomerAnalysisHub = ({ preselectedCustomerId = null, onNavigate }
   const { customers, customerSales, customerTransactions } = useApp();
   const { farmProfile } = useAuth();
 
-  const [activeMainTab, setActiveMainTab] = useState('month_conclusion'); // 'individual' | 'owner_dashboard' | 'month_conclusion' | 'payment_register'
+  const [activeMainTab, setActiveMainTab] = useState('due_matrix'); // 'due_matrix' | 'month_conclusion' | 'payment_register' | 'individual' | 'owner_dashboard'
   const [activeSubTab, setActiveSubTab] = useState('monthly'); // 'monthly' | 'daily' | 'trends' | 'ledger'
   
   const [selectedCustomerId, setSelectedCustomerId] = useState(() => {
@@ -648,6 +649,17 @@ export const CustomerAnalysisHub = ({ preselectedCustomerId = null, onNavigate }
         {/* Main View Switcher */}
         <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 self-start sm:self-auto gap-1 flex-wrap">
           <button
+            onClick={() => setActiveMainTab('due_matrix')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              activeMainTab === 'due_matrix'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            📋 ग्राहक माहवार बकाया (Due Report)
+          </button>
+
+          <button
             onClick={() => setActiveMainTab('month_conclusion')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               activeMainTab === 'month_conclusion'
@@ -692,6 +704,13 @@ export const CustomerAnalysisHub = ({ preselectedCustomerId = null, onNavigate }
           </button>
         </div>
       </div>
+
+      {/* ========================================================= */}
+      {/* TAB -1: CUSTOMER DUE MATRIX (GOOGLE SHEET GID 857195182)  */}
+      {/* ========================================================= */}
+      {activeMainTab === 'due_matrix' && (
+        <CustomerDueMatrixReport />
+      )}
 
       {/* ========================================================= */}
       {/* TAB 0: MONTH WISE CONCLUSION (GOOGLE SHEET STYLE)         */}

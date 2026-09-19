@@ -19,13 +19,14 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 
 import { MonthWiseConclusionTable } from './MonthWiseConclusionTable';
+import { CustomerDueMatrixReport } from './CustomerDueMatrixReport';
 
 export const ReportsHub = () => {
   const { t } = useLanguage();
   const { milkEntries, expenses, customers, animals, stats } = useApp();
   const { farmProfile } = useAuth();
 
-  const [reportType, setReportType] = useState('month_conclusion'); // month_conclusion, daily_milk, customer_khata, expense_report, animal_performance
+  const [reportType, setReportType] = useState('customer_due_matrix'); // customer_due_matrix, month_conclusion, daily_milk, customer_khata, expense_report, animal_performance
   const [dateRange, setDateRange] = useState('this_month');
   const [animalSearch, setAnimalSearch] = useState('');
   const [animalTypeFilter, setAnimalTypeFilter] = useState('all'); // 'all' | 'with_milk' | 'cow' | 'buffalo'
@@ -160,6 +161,7 @@ export const ReportsHub = () => {
         <div className="mt-3 pt-3 border-t border-slate-300 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+              {reportType === 'customer_due_matrix' && 'ग्राहक-वार माहवार बकाया मैट्रिक्स (Customer Due Report - gid: 857195182)'}
               {reportType === 'month_conclusion' && 'माह-वार सारांश सारणी रिपोर्ट (Month-Wise Conclusion Summary)'}
               {reportType === 'daily_milk' && 'दूध संकलन ऑडिट रिपोर्ट (Daily Milk Collection Audit Report)'}
               {reportType === 'customer_khata' && 'ग्राहक खाताबही एवं बकाया लेजर (Customer Ledger & Receivables)'}
@@ -167,6 +169,7 @@ export const ReportsHub = () => {
               {reportType === 'animal_performance' && 'पशु दुग्ध उत्पादन रैंकिंग रिपोर्ट (Cattle Milk Yield Performance)'}
             </h2>
             <p className="text-[11px] text-slate-600">
+              {reportType === 'customer_due_matrix' && 'माह-वार सभी ग्राहकों का देय व बकाया ब्योरा (Google Sheet Auto-Updating Due Pivot)'}
               {reportType === 'month_conclusion' && 'माह-वार कुल दूध (L), नकद प्राप्त व मासिक बकाया का आधिकारिक रिकॉर्ड'}
               {reportType === 'daily_milk' && `कुल रिकॉर्ड्स: ${milkEntries.length} | पशु एवं तारीख वार संकलन`}
               {reportType === 'customer_khata' && `कुल पंजीकृत ग्राहक: ${customers.length} | वर्तमान देय/बकाया विवरण`}
@@ -189,7 +192,7 @@ export const ReportsHub = () => {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Month-Wise Conclusion, Milk Production, Customer Ledger & Cattle Performance Reports
+            Customer Due Matrix, Month-Wise Conclusion, Milk Production, Ledger & Cattle Performance Reports
           </p>
         </div>
 
@@ -205,7 +208,20 @@ export const ReportsHub = () => {
       </div>
 
       {/* Report Selector Tabs (Hidden on Print) */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 no-print print:hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 no-print print:hidden">
+        <button
+          onClick={() => setReportType('customer_due_matrix')}
+          className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+            reportType === 'customer_due_matrix'
+              ? 'option-active-light'
+              : 'option-inactive-dark'
+          }`}
+        >
+          <CreditCard className="w-5 h-5 mb-1.5" />
+          <h4 className="font-bold text-xs">Customer Due Matrix</h4>
+          <p className="text-[10px] mt-0.5 opacity-80 font-medium">माहवार बकाया (Due Report)</p>
+        </button>
+
         <button
           onClick={() => setReportType('month_conclusion')}
           className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
@@ -273,7 +289,9 @@ export const ReportsHub = () => {
       </div>
 
       {/* REPORT CONTENT AREA */}
-      {reportType === 'month_conclusion' ? (
+      {reportType === 'customer_due_matrix' ? (
+        <CustomerDueMatrixReport />
+      ) : reportType === 'month_conclusion' ? (
         <MonthWiseConclusionTable />
       ) : (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-card p-5 space-y-4 print:p-0 print:border-0 print:shadow-none">
