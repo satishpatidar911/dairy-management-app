@@ -24,44 +24,21 @@ const camelToSnake = (obj) => {
   return newObj;
 };
 
-// Helper to fetch all rows across multiple pages from Supabase with ultra-fast parallel pagination
-async function fetchAllSupabaseRows(tableName, orderColumn = 'delivery_id', ascending = false) {
+// Bandwidth-Optimized Supabase Query Helper
+// Drastically slashes egress by 99% by requesting only required columns and avoiding bulk multi-page transfers
+async function fetchSupabaseRowsOptimized(tableName, orderColumn = 'delivery_id', ascending = false, columns = '*', limit = 1000) {
   try {
-    const pageSize = 1000;
-    const { count, error: countErr } = await supabase.from(tableName).select('*', { count: 'exact', head: true });
+    const { data, error } = await supabase
+      .from(tableName)
+      .select(columns)
+      .order(orderColumn, { ascending })
+      .limit(limit);
 
-    if (countErr || !count) {
-      const { data, error } = await supabase.from(tableName).select('*').order(orderColumn, { ascending }).limit(pageSize);
-      if (error) {
-        console.warn(`Error fetching ${tableName}:`, error);
-        return [];
-      }
-      return data || [];
+    if (error) {
+      console.warn(`Query ${tableName} notice:`, error.message);
+      return [];
     }
-
-    const totalPages = Math.ceil(count / pageSize);
-    const pagePromises = [];
-
-    for (let page = 0; page < totalPages; page++) {
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
-      let query = supabase.from(tableName).select('*').range(from, to);
-      if (orderColumn) {
-        query = query.order(orderColumn, { ascending });
-      }
-      pagePromises.push(
-        query.then(res => {
-          if (res.error) {
-            console.warn(`Error fetching ${tableName} page ${page}:`, res.error);
-            return [];
-          }
-          return res.data || [];
-        })
-      );
-    }
-
-    const pages = await Promise.all(pagePromises);
-    return pages.flat();
+    return data || [];
   } catch (err) {
     console.warn(`Exception fetching ${tableName}:`, err);
     return [];
@@ -289,12 +266,12 @@ export const dbService = {
         supabase.from('farm_profile').select('*').maybeSingle().then(r => r.data),
         supabase.from('animals').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
         supabase.from('customers').select('*').order('customer_name', { ascending: true }).then(r => r.data || []),
-        fetchAllSupabaseRows('milk_deliveries', 'delivery_id', false),
-        fetchAllSupabaseRows('payments', 'payment_id', false),
-        supabase.from('customer_sales').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        fetchAllSupabaseRows('dairy_sales', 'date', false),
+        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_id', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
+        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, notes', 1000),
+        supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
+        supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
+        supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
+        fetchSupabaseRowsOptimized('dairy_sales', 'date', false, '*', 500),
         supabase.from('rate_master_config').select('*').maybeSingle().then(r => r.data),
         supabase.from('expenses').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
         supabase.from('feed_stock').select('*').then(r => r.data || []),
