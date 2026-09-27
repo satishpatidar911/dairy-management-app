@@ -28,16 +28,6 @@ const safeGetItem = (key, fallback = null) => {
 };
 
 export const AppProvider = ({ children }) => {
-  // Clear heavy keys from LocalStorage on mount to guarantee zero quota errors
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem('dairy_synced_row_keys');
-      localStorage.removeItem('dairy_customer_sales');
-      localStorage.removeItem('dairy_transactions');
-      localStorage.removeItem('dairy_plant_sales');
-    } catch (e) {}
-  }
-
   // Theme Mode: 'dark' (Default) | 'light'
   const [theme, setTheme] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -216,12 +206,20 @@ export const AppProvider = ({ children }) => {
     return saved !== null ? JSON.parse(saved) : [];
   });
 
+  const DEFAULT_GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1-YeMwL36BtMSzMvlbJs8xm3CHWpsm7SsFfRQPlK6-8E/export?format=csv&gid=787113179';
+
   // 🌐 4. Google Form & Google Sheets Auto-Sync Configuration
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState(() => {
     const saved = localStorage.getItem('dairy_google_sheets_config');
-    if (saved !== null) return JSON.parse(saved);
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (!parsed.sheetUrl) parsed.sheetUrl = DEFAULT_GOOGLE_SHEET_URL;
+        return parsed;
+      } catch (e) {}
+    }
     return {
-      sheetUrl: '',
+      sheetUrl: DEFAULT_GOOGLE_SHEET_URL,
       autoSyncEnabled: true,
       syncInterval: 2, // in minutes
       lastSyncTime: null,
@@ -230,6 +228,8 @@ export const AppProvider = ({ children }) => {
       lastSyncCount: 0
     };
   });
+
+  const fetchAndSyncGoogleSheetRef = useRef(null);
 
   // Fingerprint list of synced rows to prevent duplicate billing
   const [syncedRowKeys, setSyncedRowKeys] = useState(() => {
@@ -354,6 +354,13 @@ export const AppProvider = ({ children }) => {
         }
       }
 
+      // Trigger live sync with Google Sheet to backfill all fresh deliveries up to right now
+      if (fetchAndSyncGoogleSheetRef.current) {
+        setTimeout(() => {
+          fetchAndSyncGoogleSheetRef.current?.();
+        }, 1200);
+      }
+
       setIsDbLoaded(true);
     } catch (err) {
       console.warn('Database fetch warning:', err);
@@ -380,14 +387,8 @@ export const AppProvider = ({ children }) => {
       )
       .subscribe();
 
-    // 2. High-speed 10-second backup heartbeat to guarantee zero missed events
-    const heartbeatInterval = setInterval(() => {
-      loadDataFromDatabase(true);
-    }, 10000);
-
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(heartbeatInterval);
     };
   }, [loadDataFromDatabase]);
 
@@ -879,6 +880,16 @@ export const AppProvider = ({ children }) => {
     const newRowKeys = [];
     let updatedCustomerList = [...customers];
 
+    const isFirstFullSync = customerSales.length === 0;
+    const existingKeySet = isFirstFullSync ? new Set() : new Set(syncedRowKeys);
+
+    // Fast O(1) customer map
+    const customerMap = new Map();
+    updatedCustomerList.forEach(c => {
+      if (c.name) customerMap.set(c.name.toLowerCase().trim(), c);
+      if (c.mobile) customerMap.set(String(c.mobile).trim(), c);
+    });
+
     importedRows.forEach((row, idx) => {
       const name = (row.customerName || row.name || '').trim();
       if (!name) return;
@@ -895,17 +906,18 @@ export const AppProvider = ({ children }) => {
 
       // Generate a distinct fingerprint for duplicate prevention
       const rowKey = `${name}_${date}_${shift}_${qty}_${timestamp || idx}`.toLowerCase();
-      if (syncedRowKeys.includes(rowKey)) {
+      if (existingKeySet.has(rowKey)) {
         return; // Already imported previously
       }
 
       const cashAmt = Number(row.cashPayment) || 0;
 
       if (qty > 0 || cashAmt > 0) {
+        existingKeySet.add(rowKey);
         newRowKeys.push(rowKey);
 
         // Find or Auto-Create Customer Profile
-        let existingCust = updatedCustomerList.find(c => c.name.toLowerCase() === name.toLowerCase() || (mobile && c.mobile === mobile));
+        let existingCust = customerMap.get(name.toLowerCase()) || (mobile ? customerMap.get(mobile) : null);
 
         if (!existingCust) {
           existingCust = {
@@ -922,7 +934,9 @@ export const AppProvider = ({ children }) => {
             status: 'active',
             joinedDate: date
           };
-          updatedCustomerList = [existingCust, ...updatedCustomerList];
+          customerMap.set(name.toLowerCase(), existingCust);
+          if (mobile) customerMap.set(mobile, existingCust);
+          updatedCustomerList.unshift(existingCust);
         } else {
           // Update customer balance & contact info
           const currentBal = Number(existingCust.balance) || 0;
@@ -948,18 +962,10 @@ export const AppProvider = ({ children }) => {
             }
           }
 
-          updatedCustomerList = updatedCustomerList.map(c => {
-            if (c.id === existingCust.id) {
-              return {
-                ...c,
-                balance: newBal,
-                advance: newAdv,
-                mobile: mobile || c.mobile,
-                address: address || c.address
-              };
-            }
-            return c;
-          });
+          existingCust.balance = newBal;
+          existingCust.advance = newAdv;
+          if (mobile) existingCust.mobile = mobile;
+          if (address) existingCust.address = address;
         }
 
         // Add Customer Sale if quantity > 0
@@ -1013,14 +1019,15 @@ export const AppProvider = ({ children }) => {
     });
 
     if (newSales.length > 0 || newTransactions.length > 0) {
-      setCustomers(updatedCustomerList);
-      setCustomerSales(prev => [...newSales, ...prev]);
-      setCustomerTransactions(prev => [...newTransactions, ...prev]);
-      setSyncedRowKeys(prev => [...prev, ...newRowKeys]);
+      setCustomers([...updatedCustomerList]);
+      setCustomerSales(prev => isFirstFullSync ? newSales : [...newSales, ...prev]);
+      setCustomerTransactions(prev => isFirstFullSync ? newTransactions : [...newTransactions, ...prev]);
+      setSyncedRowKeys(prev => isFirstFullSync ? newRowKeys : [...prev, ...newRowKeys]);
+      safeSetItem('dairy_customers', updatedCustomerList);
     }
 
     return newSales.length;
-  }, [customers, syncedRowKeys]);
+  }, [customers, customerSales.length, syncedRowKeys]);
 
   // Direct Customer Sale Action (Single manual entry)
   const addCustomerSale = (saleData) => {
@@ -1141,24 +1148,20 @@ export const AppProvider = ({ children }) => {
       return result;
     };
 
-    const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/['"]+/g, ''));
+    const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/['"]+/g, '').trim());
     
-    // Fuzzy column index search
-    const getColIdx = (keywords) => {
-      return headers.findIndex(h => keywords.some(k => h.includes(k.toLowerCase())));
-    };
-
-    const nameIdx = getColIdx(['customer name', 'name', 'ग्राहक', 'नाम', 'fullname', 'client', 'customer']);
-    const otherCustIdx = getColIdx(['other customer', 'other']);
-    const qtyIdx = getColIdx(['quantity', 'liters', 'qty', 'मात्रा', 'दूध', 'milk', 'volume', 'लीटर']);
-    const rateIdx = getColIdx(['rate', 'price', 'दर', 'मूल्य', 'cost', 'rupees', '₹']);
-    const cashPmtIdx = getColIdx(['cash payment', 'cash', 'payment', 'जमा', 'भुगतान', 'नगद']);
-    const shiftIdx = getColIdx(['shift', 'शिफ्ट', 'slot', 'time', 'समय', 'सुबह/शाम', 'morning/evening', 'delivery time']);
-    const dateIdx = getColIdx(['date', 'दिनांक', 'तारीख', 'timestamp', 'समय']);
-    const mobileIdx = getColIdx(['mobile', 'phone', 'contact', 'मोबाइल', 'फोन', 'नंबर', 'cell']);
-    const addressIdx = getColIdx(['address', 'पता', 'location', 'स्थान', 'मोहल्ला', 'village', 'गांव']);
-    const typeIdx = getColIdx(['type', 'breed', 'गाय/भैंस', 'प्रकार', 'नस्ल', 'cow/buffalo']);
-    const timestampIdx = getColIdx(['timestamp', 'time']);
+    // Precise column resolution: exact matches prioritized over substring collision (e.g. avoids 'timestamp' matching 'date' or 'time')
+    const dateIdx = headers.findIndex(h => h === 'date' || h === 'दिनांक' || h === 'तारीख' || (h.includes('date') && !h.includes('candidate')));
+    const shiftIdx = headers.findIndex(h => h === 'delivery time' || h.includes('shift') || h.includes('शिफ्ट') || (h.includes('time') && !h.includes('timestamp')));
+    const nameIdx = headers.findIndex(h => h.includes('customer name') || h === 'name' || h.includes('ग्राहक') || h.includes('नाम'));
+    const otherCustIdx = headers.findIndex(h => h.includes('other customer') || h.includes('other'));
+    const qtyIdx = headers.findIndex(h => h.includes('how much milk') || h.includes('quantity') || h.includes('liters') || h.includes('qty') || h.includes('दूध'));
+    const rateIdx = headers.findIndex(h => h === 'rate' || h === 'price' || h.includes('दर') || h.includes('मूल्य'));
+    const cashPmtIdx = headers.findIndex(h => h.includes('cash payment') || h.includes('cash') || h.includes('नगद'));
+    const mobileIdx = headers.findIndex(h => h.includes('mobile') || h.includes('phone') || h.includes('मोबाइल') || h.includes('फोन'));
+    const addressIdx = headers.findIndex(h => h.includes('address') || h.includes('पता') || h.includes('village'));
+    const typeIdx = headers.findIndex(h => h.includes('गाय/भैंस') || h.includes('breed') || h.includes('cow/buffalo'));
+    const timestampIdx = headers.findIndex(h => h === 'timestamp');
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
@@ -1339,6 +1342,8 @@ export const AppProvider = ({ children }) => {
       return { success: false, error: errMsg };
     }
   };
+
+  fetchAndSyncGoogleSheetRef.current = fetchAndSyncGoogleSheet;
 
   const updateGoogleSheetsConfig = (newConfig) => {
     setGoogleSheetsConfig(prev => ({ ...prev, ...newConfig }));

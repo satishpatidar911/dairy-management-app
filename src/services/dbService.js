@@ -467,8 +467,33 @@ export const dbService = {
           };
         }) : [],
       };
+
+      // Fallback: If Supabase returned 0 customers and sales (e.g. quota exceeded or offline), fall back to initial_db snapshot
+      if ((!mappedCustomers || mappedCustomers.length === 0) && (!mappedCustomerSales || mappedCustomerSales.length === 0)) {
+        console.warn('⚠️ Supabase returned 0 rows (quota restricted or offline). Falling back to initial_db snapshot...');
+        try {
+          const fallbackRes = await fetch('/initial_db.json').catch(() => null);
+          if (fallbackRes && fallbackRes.ok) {
+            const fallbackJson = await fallbackRes.json();
+            if (fallbackJson && typeof fallbackJson === 'object') {
+              return fallbackJson;
+            }
+          }
+        } catch (fbErr) {
+          console.warn('Failed to load /initial_db.json fallback:', fbErr);
+        }
+      }
     } catch (err) {
-      console.warn('Supabase fetch failed, falling back to local storage:', err);
+      console.warn('Supabase fetch failed, falling back to static snapshot:', err);
+      try {
+        const fallbackRes = await fetch('/initial_db.json').catch(() => null);
+        if (fallbackRes && fallbackRes.ok) {
+          const fallbackJson = await fallbackRes.json();
+          if (fallbackJson && typeof fallbackJson === 'object') {
+            return fallbackJson;
+          }
+        }
+      } catch (fbErr) {}
     }
 
     return cloudData;
