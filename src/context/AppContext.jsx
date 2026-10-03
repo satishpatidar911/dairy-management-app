@@ -221,7 +221,7 @@ export const AppProvider = ({ children }) => {
     return {
       sheetUrl: DEFAULT_GOOGLE_SHEET_URL,
       autoSyncEnabled: true,
-      syncInterval: 2, // in minutes
+      syncInterval: 15, // in minutes (optimized to prevent quota exhaustion)
       lastSyncTime: null,
       lastSyncStatus: 'idle', // 'idle' | 'syncing' | 'success' | 'error'
       lastSyncMessage: '',
@@ -241,6 +241,7 @@ export const AppProvider = ({ children }) => {
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const isDirtyRef = useRef(false);
   const isInitialLoadRef = useRef(true);
+  const lastLoadTimeRef = useRef(0);
 
   // Helper to check if running on local development machine
   const isLocalServer = typeof window !== 'undefined' && 
@@ -260,6 +261,13 @@ export const AppProvider = ({ children }) => {
 
   const loadDataFromDatabase = useCallback(async (forceCloud = false) => {
     try {
+      const now = Date.now();
+      // Throttle: Skip cloud refetch if already loaded within the last 60 seconds unless explicitly forced by user
+      if (!forceCloud && now - lastLoadTimeRef.current < 60000) {
+        return;
+      }
+      lastLoadTimeRef.current = now;
+
       let hasLocalRecords = false;
 
       // 1. Fetch local server disk database (/api/db) ONLY when on localhost
@@ -354,13 +362,6 @@ export const AppProvider = ({ children }) => {
         }
       }
 
-      // Trigger live sync with Google Sheet to backfill all fresh deliveries up to right now
-      if (fetchAndSyncGoogleSheetRef.current) {
-        setTimeout(() => {
-          fetchAndSyncGoogleSheetRef.current?.();
-        }, 1200);
-      }
-
       setIsDbLoaded(true);
     } catch (err) {
       console.warn('Database fetch warning:', err);
@@ -372,17 +373,63 @@ export const AppProvider = ({ children }) => {
     loadDataFromDatabase(true);
   }, [loadDataFromDatabase]);
 
-  // ⚡ INSTANT REAL-TIME SYNC (Sub-second live updates via Supabase WebSockets)
+  // ⚡ INSTANT REAL-TIME SYNC (Sub-second live updates via Supabase WebSockets without REST Egress)
   useEffect(() => {
-    // 1. Subscribe to real-time database changes (pushes updates in milliseconds!)
     const channel = supabase
       .channel('realtime_milk_deliveries')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'milk_deliveries' },
         (payload) => {
-          console.log('⚡ Realtime Delivery Event:', payload.eventType);
-          loadDataFromDatabase(true);
+          const { eventType, new: newRow, old: oldRow } = payload;
+          if (eventType === 'INSERT' && newRow) {
+            const liters = Number(newRow.milk_liters) || 0;
+            const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
+            const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
+            const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
+
+            const saleItem = {
+              id: `DELIV-${newRow.delivery_id}`,
+              rawDeliveryId: newRow.delivery_id,
+              customerId: newRow.customer_id ? `CUST-${newRow.customer_id}` : '',
+              customerName: newRow.customer_name_original || 'ग्राहक',
+              date: newRow.delivery_date,
+              shift,
+              quantity: liters,
+              rate,
+              amount: bill,
+              source: 'Supabase Database',
+              note: newRow.other_customer_note || ''
+            };
+
+            setCustomerSales(prev => {
+              if (prev.some(s => s.id === saleItem.id || s.rawDeliveryId === newRow.delivery_id)) return prev;
+              return [saleItem, ...prev];
+            });
+          } else if (eventType === 'UPDATE' && newRow) {
+            const liters = Number(newRow.milk_liters) || 0;
+            const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
+            const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
+            const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
+
+            setCustomerSales(prev => prev.map(s => {
+              if (s.id === `DELIV-${newRow.delivery_id}` || s.rawDeliveryId === newRow.delivery_id) {
+                return {
+                  ...s,
+                  customerName: newRow.customer_name_original || s.customerName,
+                  date: newRow.delivery_date,
+                  shift,
+                  quantity: liters,
+                  rate,
+                  amount: bill,
+                  note: newRow.other_customer_note || s.note
+                };
+              }
+              return s;
+            }));
+          } else if (eventType === 'DELETE' && oldRow) {
+            setCustomerSales(prev => prev.filter(s => s.id !== `DELIV-${oldRow.delivery_id}` && s.rawDeliveryId !== oldRow.delivery_id));
+          }
         }
       )
       .subscribe();
@@ -390,7 +437,7 @@ export const AppProvider = ({ children }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadDataFromDatabase]);
+  }, []);
 
   // Save to Disk Database whenever state changes (debounced, dirty-checked, zero GET overhead)
   useEffect(() => {
@@ -1349,18 +1396,23 @@ export const AppProvider = ({ children }) => {
     setGoogleSheetsConfig(prev => ({ ...prev, ...newConfig }));
   };
 
-  // Background Automatic Polling Timer for Google Sheets Live Sync
+  // Background Automatic Polling Timer for Google Sheets Live Sync (Throttled for Egress Safety)
   useEffect(() => {
     if (!googleSheetsConfig.autoSyncEnabled || !googleSheetsConfig.sheetUrl) return;
 
-    // Run initial sync after mount
+    // Run initial sync after mount (only if document is visible)
     const initialTimer = setTimeout(() => {
-      fetchAndSyncGoogleSheet();
-    }, 2000);
+      if (typeof document === 'undefined' || !document.hidden) {
+        fetchAndSyncGoogleSheet();
+      }
+    }, 3000);
 
-    // Set recurring timer
-    const intervalMs = Math.max(1, googleSheetsConfig.syncInterval || 2) * 60 * 1000;
+    // Set recurring timer: minimum 10 minutes interval, pauses when tab is hidden
+    const intervalMs = Math.max(10, googleSheetsConfig.syncInterval || 15) * 60 * 1000;
     const intervalTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return; // Skip syncing if tab is minimized or in background
+      }
       fetchAndSyncGoogleSheet();
     }, intervalMs);
 

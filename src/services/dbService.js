@@ -239,13 +239,10 @@ export const dbService = {
     }
   },
 
-  // 1. Fetch All Data from Supabase with Intelligent Multi-Table Mapping & Full Pagination
+  // 1. Fetch All Data from Supabase with Intelligent Multi-Table Mapping & Bandwidth Optimization
   async loadAll() {
     let cloudData = null;
     try {
-      // Auto-reconcile in background to guarantee zero missing entries
-      await this.reconcileGoogleSheet().catch(() => {});
-
       const [
         farmProfileRes,
         animalsRes,
@@ -264,20 +261,20 @@ export const dbService = {
         brdRes
       ] = await Promise.all([
         supabase.from('farm_profile').select('*').maybeSingle().then(r => r.data),
-        supabase.from('animals').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('customers').select('*').order('customer_name', { ascending: true }).then(r => r.data || []),
-        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_id', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
-        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, notes', 1000),
-        supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
-        supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
-        supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).limit(500).then(r => r.data || []),
-        fetchSupabaseRowsOptimized('dairy_sales', 'date', false, '*', 500),
+        supabase.from('animals').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
+        supabase.from('customers').select('*').order('customer_name', { ascending: true }).limit(200).then(r => r.data || []),
+        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_id', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 250),
+        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, notes', 250),
+        supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
+        supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
+        supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
+        fetchSupabaseRowsOptimized('dairy_sales', 'date', false, '*', 100),
         supabase.from('rate_master_config').select('*').maybeSingle().then(r => r.data),
-        supabase.from('expenses').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('feed_stock').select('*').then(r => r.data || []),
-        supabase.from('health_records').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('vaccinations').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('breeding_records').select('*').order('created_at', { ascending: false }).then(r => r.data || []),
+        supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
+        supabase.from('feed_stock').select('*').limit(50).then(r => r.data || []),
+        supabase.from('health_records').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
+        supabase.from('vaccinations').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
+        supabase.from('breeding_records').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
       ]);
 
       // Process Customers from 'customers' table
