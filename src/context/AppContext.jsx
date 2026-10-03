@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService } from '../services/dbService';
-import { supabase } from '../utils/supabase.js';
+import { db } from '../utils/firebase.js';
+import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 
 const AppContext = createContext();
 
@@ -373,70 +374,32 @@ export const AppProvider = ({ children }) => {
     loadDataFromDatabase(true);
   }, [loadDataFromDatabase]);
 
-  // ⚡ INSTANT REAL-TIME SYNC (Sub-second live updates via Supabase WebSockets without REST Egress)
+  // ⚡ INSTANT REAL-TIME SYNC (Sub-second live updates via Firebase Firestore)
   useEffect(() => {
-    const channel = supabase
-      .channel('realtime_milk_deliveries')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'milk_deliveries' },
-        (payload) => {
-          const { eventType, new: newRow, old: oldRow } = payload;
-          if (eventType === 'INSERT' && newRow) {
-            const liters = Number(newRow.milk_liters) || 0;
-            const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
-            const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
-            const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
-
-            const saleItem = {
-              id: `DELIV-${newRow.delivery_id}`,
-              rawDeliveryId: newRow.delivery_id,
-              customerId: newRow.customer_id ? `CUST-${newRow.customer_id}` : '',
-              customerName: newRow.customer_name_original || 'ग्राहक',
-              date: newRow.delivery_date,
-              shift,
-              quantity: liters,
-              rate,
-              amount: bill,
-              source: 'Supabase Database',
-              note: newRow.other_customer_note || ''
-            };
-
+    try {
+      const q = query(collection(db, 'customer_sales'), orderBy('date', 'desc'), limit(50));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          const docData = change.doc.data();
+          if (change.type === 'added') {
             setCustomerSales(prev => {
-              if (prev.some(s => s.id === saleItem.id || s.rawDeliveryId === newRow.delivery_id)) return prev;
-              return [saleItem, ...prev];
+              if (prev.some(s => s.id === docData.id)) return prev;
+              return [docData, ...prev];
             });
-          } else if (eventType === 'UPDATE' && newRow) {
-            const liters = Number(newRow.milk_liters) || 0;
-            const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
-            const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
-            const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
-
-            setCustomerSales(prev => prev.map(s => {
-              if (s.id === `DELIV-${newRow.delivery_id}` || s.rawDeliveryId === newRow.delivery_id) {
-                return {
-                  ...s,
-                  customerName: newRow.customer_name_original || s.customerName,
-                  date: newRow.delivery_date,
-                  shift,
-                  quantity: liters,
-                  rate,
-                  amount: bill,
-                  note: newRow.other_customer_note || s.note
-                };
-              }
-              return s;
-            }));
-          } else if (eventType === 'DELETE' && oldRow) {
-            setCustomerSales(prev => prev.filter(s => s.id !== `DELIV-${oldRow.delivery_id}` && s.rawDeliveryId !== oldRow.delivery_id));
+          } else if (change.type === 'modified') {
+            setCustomerSales(prev => prev.map(s => s.id === docData.id ? { ...s, ...docData } : s));
+          } else if (change.type === 'removed') {
+            setCustomerSales(prev => prev.filter(s => s.id !== docData.id));
           }
-        }
-      )
-      .subscribe();
+        });
+      }, (err) => {
+        console.warn('Firestore realtime listener notice:', err);
+      });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn('Firestore realtime init error:', e);
+    }
   }, []);
 
   // Save to Disk Database whenever state changes (debounced, dirty-checked, zero GET overhead)
