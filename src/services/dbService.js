@@ -116,25 +116,51 @@ export const dbService = {
         }
       }
 
+      const resolvedFarmProfile = farmProfile ? {
+        id: 'default',
+        farmName: farmProfile.farmName || farmProfile.farm_name || 'SHIVAJI COMPUTER MILK',
+        ownerName: farmProfile.ownerName || farmProfile.owner_name || 'SATISH PATIDAR',
+        phone: farmProfile.phone || '8770234735',
+        address: farmProfile.address || 'BUSSTAND KALAPIPAL MANDI',
+        tagline: farmProfile.tagline || 'शुद्ध एवं ताजा दूध, स्वस्थ परिवार',
+        upiId: farmProfile.upiId || farmProfile.upi_id || 'dairyfarm@upi'
+      } : {
+        farmName: 'SHIVAJI COMPUTER MILK',
+        ownerName: 'SATISH PATIDAR',
+        phone: '8770234735',
+        address: 'BUSSTAND KALAPIPAL MANDI',
+        tagline: 'शुद्ध एवं ताजा दूध, स्वस्थ परिवार'
+      };
+
+      const resolvedRateMaster = rateMasterConfig ? {
+        pricingMode: rateMasterConfig.pricingMode || 'fat_only',
+        buffaloFatRate: Number(rateMasterConfig.buffaloFatRate || 9.33),
+        cowFatRate: Number(rateMasterConfig.cowFatRate || 8.50),
+        cowBaseFat: Number(rateMasterConfig.cowBaseFat || rateMasterConfig.cow_base_fat || 3.5),
+        cowBaseSnf: Number(rateMasterConfig.cowBaseSnf || rateMasterConfig.cow_base_snf || 8.5),
+        cowBaseRate: Number(rateMasterConfig.cowBaseRate || rateMasterConfig.cow_base_rate || 38.0),
+        cowFatDiff: Number(rateMasterConfig.cowFatDiff || rateMasterConfig.cow_fat_diff || 0.40),
+        cowSnfDiff: Number(rateMasterConfig.cowSnfDiff || rateMasterConfig.cow_snf_diff || 0.25),
+        buffaloBaseFat: Number(rateMasterConfig.buffaloBaseFat || rateMasterConfig.buffalo_base_fat || 6.5),
+        buffaloBaseSnf: Number(rateMasterConfig.buffaloBaseSnf || rateMasterConfig.buffalo_base_snf || 9.0),
+        buffaloBaseRate: Number(rateMasterConfig.buffaloBaseRate || rateMasterConfig.buffalo_base_rate || 68.0),
+        buffaloFatDiff: Number(rateMasterConfig.buffaloFatDiff || rateMasterConfig.buffalo_fat_diff || 0.65),
+        buffaloSnfDiff: Number(rateMasterConfig.buffaloSnfDiff || rateMasterConfig.buffalo_snf_diff || 0.35),
+      } : {
+        pricingMode: 'fat_only',
+        buffaloFatRate: 9.33,
+        cowFatRate: 8.50
+      };
+
       cloudData = {
-        farmProfile: farmProfile || {
-          farmName: 'SHIVAJI MILK CENTER',
-          ownerName: 'SATISH PATIDAR',
-          phone: '8770234735',
-          address: '',
-          tagline: 'शुद्धता और विश्वास का प्रतीक'
-        },
+        farmProfile: resolvedFarmProfile,
         animals: animals || [],
         customers: customers || [],
         customerSales: customerSales || [],
         customerTransactions: customerTransactions || [],
         dairySales: dairySales || [],
         milkEntries: milkEntries || [],
-        rateMasterConfig: rateMasterConfig || {
-          pricingMode: 'fat_only',
-          buffaloFatRate: 9.33,
-          cowFatRate: 8.5
-        },
+        rateMasterConfig: resolvedRateMaster,
         expenses: expenses || [],
         feedStock: feedStock || [],
         healthRecords: healthRecords || [],
