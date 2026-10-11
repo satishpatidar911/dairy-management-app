@@ -384,6 +384,8 @@ export const AppProvider = ({ children }) => {
               const healedSales = cloudDb.customerSales.map(healCustomerSale);
               setCustomerSales(healedSales);
               safeSetItem('dairy_customer_sales', healedSales);
+              const keys = healedSales.map(s => `${(s.customerName || '').toLowerCase().trim()}_${s.date}_${(s.shift || 'morning').toLowerCase()}_${Number(s.quantity || 0)}`);
+              setSyncedRowKeys(prev => [...new Set([...prev, ...keys])]);
             }
             if (Array.isArray(cloudDb.dairySales) && cloudDb.dairySales.length > 0) {
               setDairySales(cloudDb.dairySales);
@@ -978,8 +980,15 @@ export const AppProvider = ({ children }) => {
     const newRowKeys = [];
     let updatedCustomerList = [...customers];
 
-    const isFirstFullSync = customerSales.length === 0;
-    const existingKeySet = isFirstFullSync ? new Set() : new Set(syncedRowKeys);
+    const existingKeySet = new Set(syncedRowKeys);
+    // Index current customerSales to guarantee zero duplicates across database and sheet
+    customerSales.forEach(s => {
+      const sName = (s.customerName || '').toLowerCase().trim();
+      const sDate = (s.date || '').trim();
+      const sShift = (s.shift || 'morning').toLowerCase();
+      const sQty = Number(s.quantity || 0);
+      existingKeySet.add(`${sName}_${sDate}_${sShift}_${sQty}`);
+    });
 
     // Fast O(1) customer map
     const customerMap = new Map();
@@ -1002,17 +1011,20 @@ export const AppProvider = ({ children }) => {
       const milkType = (row.milkType || 'cow').toLowerCase().includes('buf') || (row.milkType || '').includes('भैंस') ? 'buffalo' : 'cow';
       const timestamp = row.timestamp || '';
 
-      // Generate a distinct fingerprint for duplicate prevention
-      const rowKey = `${name}_${date}_${shift}_${qty}_${timestamp || idx}`.toLowerCase();
-      if (existingKeySet.has(rowKey)) {
-        return; // Already imported previously
+      // Generate distinct fingerprints for exact duplicate prevention
+      const baseKey = `${name.toLowerCase()}_${date}_${shift}_${qty}`;
+      if (existingKeySet.has(baseKey)) {
+        return; // Already in Supabase / customerSales! Skip to prevent duplication!
+      }
+      if (timestamp && existingKeySet.has(`${baseKey}_${timestamp.toLowerCase()}`)) {
+        return; // Already imported previously with timestamp!
       }
 
       const cashAmt = Number(row.cashPayment) || 0;
 
       if (qty > 0 || cashAmt > 0) {
-        existingKeySet.add(rowKey);
-        newRowKeys.push(rowKey);
+        existingKeySet.add(baseKey);
+        newRowKeys.push(baseKey);
 
         // Find or Auto-Create Customer Profile
         let existingCust = customerMap.get(name.toLowerCase()) || (mobile ? customerMap.get(mobile) : null);
@@ -1118,14 +1130,19 @@ export const AppProvider = ({ children }) => {
 
     if (newSales.length > 0 || newTransactions.length > 0) {
       setCustomers([...updatedCustomerList]);
-      setCustomerSales(prev => isFirstFullSync ? newSales : [...newSales, ...prev]);
-      setCustomerTransactions(prev => isFirstFullSync ? newTransactions : [...newTransactions, ...prev]);
-      setSyncedRowKeys(prev => isFirstFullSync ? newRowKeys : [...prev, ...newRowKeys]);
+      if (newSales.length > 0) {
+        setCustomerSales(prev => [...newSales, ...prev]);
+        newSales.forEach(s => dbService.saveCustomerSale(s));
+      }
+      if (newTransactions.length > 0) {
+        setCustomerTransactions(prev => [...newTransactions, ...prev]);
+      }
+      setSyncedRowKeys(prev => [...new Set([...prev, ...newRowKeys])]);
       safeSetItem('dairy_customers', updatedCustomerList);
     }
 
     return newSales.length;
-  }, [customers, customerSales.length, syncedRowKeys]);
+  }, [customers, customerSales, syncedRowKeys]);
 
   // Direct Customer Sale Action (Single manual entry)
   const addCustomerSale = (saleData) => {

@@ -269,7 +269,7 @@ export const dbService = {
         supabase.from('animals').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
         supabase.from('customers').select('*').order('customer_name', { ascending: true }).limit(200).then(r => r.data || []),
         fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_id', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
-        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, notes', 500),
+        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, other_customer_note', 500),
         supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
         supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
         supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
@@ -516,7 +516,16 @@ export const dbService = {
       const shift = String(sale.shift || 'morning').toUpperCase();
       const rawCustId = sale.customerId ? parseInt(String(sale.customerId).replace(/\D/g, '')) : null;
 
+      // Find current max delivery_id to prevent sequence collision
+      const { data: top } = await supabase
+        .from('milk_deliveries')
+        .select('delivery_id')
+        .order('delivery_id', { ascending: false })
+        .limit(1);
+      const nextId = (top && top[0]?.delivery_id ? top[0].delivery_id : 35200) + 1;
+
       const deliveryPayload = {
+        delivery_id: nextId,
         delivery_date: sale.date || new Date().toISOString().split('T')[0],
         delivery_time: shift.includes('EV') ? 'EVENING' : 'MORNING',
         customer_id: rawCustId || null,
@@ -528,7 +537,7 @@ export const dbService = {
 
       const { data, error } = await supabase.from('milk_deliveries').insert(deliveryPayload).select('*');
       if (error) console.error('Supabase saveCustomerSale error:', error);
-      else console.log('✓ Milk delivery directly saved to Supabase');
+      else console.log('✓ Milk delivery directly saved to Supabase (ID:', nextId, ')');
       return data?.[0];
     } catch (e) {
       console.warn('saveCustomerSale to Supabase error:', e);
@@ -548,7 +557,17 @@ export const dbService = {
   async savePayment(payment) {
     try {
       const rawCustId = payment.customerId ? parseInt(String(payment.customerId).replace(/\D/g, '')) : null;
+
+      // Find current max payment_id to prevent sequence collision
+      const { data: topPmt } = await supabase
+        .from('payments')
+        .select('payment_id')
+        .order('payment_id', { ascending: false })
+        .limit(1);
+      const nextPmtId = (topPmt && topPmt[0]?.payment_id ? topPmt[0].payment_id : 9500) + 1;
+
       const payload = {
+        payment_id: nextPmtId,
         payment_date: payment.date || new Date().toISOString().split('T')[0],
         customer_id: rawCustId || null,
         customer_name_original: payment.customerName || 'Customer',
@@ -559,7 +578,7 @@ export const dbService = {
 
       const { error } = await supabase.from('payments').insert(payload);
       if (error) console.error('Supabase savePayment error:', error);
-      else console.log('✓ Payment directly saved to Supabase');
+      else console.log('✓ Payment directly saved to Supabase (ID:', nextPmtId, ')');
     } catch (e) {
       console.warn('savePayment to Supabase error:', e);
     }
