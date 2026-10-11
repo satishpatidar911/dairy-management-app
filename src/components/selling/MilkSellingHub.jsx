@@ -113,7 +113,7 @@ export const MilkSellingHub = () => {
       fat: String(sale.fat || '6.5'),
       snf: isFatOnly ? '' : String(sale.snf || ''),
       customFatRate: '',
-      manualRate: String(sale.rate || '60'),
+      manualRate: String(sale.rate || '70'),
       slipNo: sale.slipNo || '',
       status: sale.status || 'completed'
     });
@@ -127,7 +127,7 @@ export const MilkSellingHub = () => {
       shift: sale.shift || 'morning',
       customerName: sale.customerName || '',
       quantity: String(sale.quantity || ''),
-      rate: String(sale.rate || '60'),
+      rate: String(sale.rate || '70'),
       amount: String(sale.amount || '')
     });
     setIsEditCustomerModalOpen(true);
@@ -146,7 +146,7 @@ export const MilkSellingHub = () => {
   // Edit Modal Auto-Calculated Rate
   const editAutoCalculatedRate = useMemo(() => {
     if (editDairyForm.pricingMode === 'fixed') {
-      return Number(editDairyForm.manualRate) || 60;
+      return Number(editDairyForm.manualRate) || 70;
     }
     const snfVal = editDairyForm.pricingMode === 'fat_snf' ? editDairyForm.snf : null;
     return calculateRateFromMaster(
@@ -225,7 +225,7 @@ export const MilkSellingHub = () => {
     date: new Date().toISOString().split('T')[0],
     shift: 'morning',
     quantity: '',
-    rate: customers[0]?.rate ? String(customers[0].rate) : '60'
+    rate: customers[0]?.rate ? String(customers[0].rate) : '70'
   });
 
   // TAB 1: GOOGLE SHEETS CUSTOMER SALE STATE
@@ -270,7 +270,7 @@ export const MilkSellingHub = () => {
         if (name.toLowerCase().includes('name') || name.toLowerCase().includes('ग्राहक')) return;
 
         const qty = parseFloat(cols[1]?.trim()) || 0;
-        const rate = parseFloat(cols[2]?.trim()) || 60;
+        const rate = parseFloat(cols[2]?.trim()) || 70;
         const shift = cols[3]?.trim().toLowerCase().includes('ev') || cols[3]?.trim().includes('शाम') ? 'evening' : 'morning';
         const date = cols[4]?.trim() || new Date().toISOString().split('T')[0];
         const amount = Math.round(qty * rate);
@@ -327,7 +327,7 @@ export const MilkSellingHub = () => {
       return;
     }
 
-    const rate = Number(directSaleForm.rate) || 60;
+    const rate = Number(directSaleForm.rate) || 70;
     const amount = Math.round(qty * rate);
 
     addCustomerSale({
@@ -390,6 +390,26 @@ export const MilkSellingHub = () => {
       setDairyForm(prev => ({ ...prev, dairyName: dairyCenters[0].name }));
     }
   }, [dairyCenters, dairyForm.dairyName]);
+
+  // Ensure default customer and rate (₹70/L) is synced when customers load
+  useEffect(() => {
+    if (customers && customers.length > 0) {
+      setDirectSaleForm(prev => {
+        const currentCust = customers.find(c => c.id === prev.customerId);
+        if (!prev.customerId || !currentCust || prev.rate === '60' || !prev.rate) {
+          const selected = currentCust || customers[0];
+          const defaultQty = prev.shift === 'evening' ? (selected.eveningQty || '') : (selected.morningQty || '');
+          return {
+            ...prev,
+            customerId: selected.id,
+            rate: selected.rate ? String(selected.rate) : '70',
+            quantity: prev.quantity || (defaultQty ? String(defaultQty) : '')
+          };
+        }
+        return prev;
+      });
+    }
+  }, [customers]);
 
   const handleAddNewDairy = (e) => {
     e.preventDefault();
@@ -2039,7 +2059,7 @@ export const MilkSellingHub = () => {
                       setDirectSaleForm(prev => ({
                         ...prev,
                         customerId: e.target.value,
-                        rate: selected?.rate ? String(selected.rate) : prev.rate,
+                        rate: selected?.rate ? String(selected.rate) : (prev.rate || '70'),
                         quantity: defaultQty ? String(defaultQty) : prev.quantity
                       }));
                     }}
@@ -2047,7 +2067,7 @@ export const MilkSellingHub = () => {
                   >
                     {customers.map(c => (
                       <option key={c.id} value={c.id}>
-                        {c.name} (🌅 {c.morningQty || 0}L · 🌇 {c.eveningQty || 0}L | दर: ₹{c.rate || 60}/L)
+                        {c.name} (🌅 {c.morningQty || 0}L · 🌇 {c.eveningQty || 0}L | दर: ₹{c.rate || 70}/L)
                       </option>
                     ))}
                   </select>

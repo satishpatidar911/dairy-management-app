@@ -40,10 +40,10 @@ const defaultSeedMilk = [
 ];
 
 const defaultSeedCustomerSales = [
-  { id: 1, date: "27 Aug", customer: "Sharma जी", liters: 8, rate: 60, amount: 480 },
-  { id: 2, date: "27 Aug", customer: "Verma निवास", liters: 5, rate: 60, amount: 300 },
-  { id: 3, date: "26 Aug", customer: "Gupta स्टोर", liters: 12, rate: 58, amount: 696 },
-  { id: 4, date: "25 Aug", customer: "Sharma जी", liters: 8, rate: 60, amount: 480 },
+  { id: 1, date: "27 Aug", customer: "Sharma जी", liters: 8, rate: 70, amount: 560 },
+  { id: 2, date: "27 Aug", customer: "Verma निवास", liters: 5, rate: 70, amount: 350 },
+  { id: 3, date: "26 Aug", customer: "Gupta स्टोर", liters: 12, rate: 70, amount: 840 },
+  { id: 4, date: "25 Aug", customer: "Sharma जी", liters: 8, rate: 70, amount: 560 },
 ];
 
 const defaultSeedDairySales = [
@@ -710,7 +710,7 @@ export function DairyDashboard() {
                     { key: "date", label: "तारीख", width: 95, defaultValue: "27 Aug" },
                     { key: "customer", label: "ग्राहक का नाम", placeholder: "e.g. शर्मा जी", width: 140 },
                     { key: "liters", label: "मात्रा (L)", type: "number", placeholder: "0", width: 85 },
-                    { key: "rate", label: "दर (₹/L)", type: "number", defaultValue: "60", width: 85 },
+                    { key: "rate", label: "दर (₹/L)", type: "number", defaultValue: "70", width: 85 },
                   ]}
                   onAdd={(v) => {
                     const liters = Number(v.liters);

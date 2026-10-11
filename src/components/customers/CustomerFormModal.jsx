@@ -16,7 +16,7 @@ export const CustomerFormModal = ({ isOpen, onClose, customer = null }) => {
     milkType: customer?.milkType || 'cow',
     morningQty: customer?.morningQty || 1.5,
     eveningQty: customer?.eveningQty || 1.5,
-    rate: customer?.rate || 65,
+    rate: customer?.rate || 70,
     balance: customer?.balance || 0,
     advance: customer?.advance || 0
   });

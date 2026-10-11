@@ -766,7 +766,7 @@ export const CustomerMilkReport = ({
                               )}
                             </div>
                             <div className={`text-[10px] font-normal mt-0.5 ${isHighlighted ? 'text-blue-100' : 'text-slate-400'}`}>
-                              {cust.mobile || cust.phone || 'No Mobile'} • Rate: ₹{cust.rate || 58}/L
+                              {cust.mobile || cust.phone || 'No Mobile'} • Rate: ₹{cust.rate || 70}/L
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -1256,7 +1256,7 @@ export const CustomerMilkReport = ({
               <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-slate-300">
                 <span>कुल राशि (Total):</span>
                 <span className="text-emerald-400 text-sm font-black font-mono">
-                  ₹{Math.round(((Number(entryMorningQty) || 0) + (Number(entryEveningQty) || 0)) * (Number(entryRate) || 58))}
+                  ₹{Math.round(((Number(entryMorningQty) || 0) + (Number(entryEveningQty) || 0)) * (Number(entryRate) || 70))}
                 </span>
               </div>
 

@@ -154,7 +154,7 @@ export const initialCustomers = [
     milkType: "cow",
     morningQty: 2.0,
     eveningQty: 1.5,
-    rate: 60,
+    rate: 70,
     balance: 1450,
     advance: 0,
     status: "active",
@@ -445,8 +445,8 @@ export const initialCustomerTransactions = [
     date: new Date().toISOString().split('T')[0],
     type: "milk_supply",
     liters: 3.5,
-    rate: 60,
-    amount: 210,
+    rate: 70,
+    amount: 245,
     balanceAfter: 1450,
     note: "Morning 2.0L + Evening 1.5L"
   },
@@ -497,8 +497,8 @@ export const initialCustomerSales = [
     date: new Date().toISOString().split('T')[0],
     shift: "morning",
     quantity: 3.5,
-    rate: 60,
-    amount: 210,
+    rate: 70,
+    amount: 245,
     source: "Direct Entry"
   },
   {
@@ -530,8 +530,8 @@ export const initialCustomerSales = [
     date: new Date().toISOString().split('T')[0],
     shift: "morning",
     quantity: 6.5,
-    rate: 60,
-    amount: 390,
+    rate: 70,
+    amount: 455,
     source: "Direct Entry"
   }
 ];

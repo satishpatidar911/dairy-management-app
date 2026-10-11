@@ -497,7 +497,9 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
       }
       const item = map.get(name);
       const q = Number(s.quantity || s.liters || 0);
-      const a = Number(s.amount || (q * (s.rate || 70)));
+      const isRate60 = !s.rate || Number(s.rate) === 60;
+      const effRate = isRate60 ? 70 : Number(s.rate);
+      const a = isRate60 ? Math.round(q * 70) : Number(s.amount || Math.round(q * effRate));
       item.count++;
       if (isEveningShift(s.shift)) {
         item.eveningLiters = Number((item.eveningLiters + q).toFixed(2));
@@ -526,7 +528,9 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     let mQty = 0, eQty = 0, totQty = 0, totAmt = 0;
     customerFilteredSales.forEach(s => {
       const qVal = Number(s.quantity || s.liters || 0);
-      const aVal = Number(s.amount || (qVal * (s.rate || 70)));
+      const isRate60 = !s.rate || Number(s.rate) === 60;
+      const effRate = isRate60 ? 70 : Number(s.rate);
+      const aVal = isRate60 ? Math.round(qVal * 70) : Number(s.amount || Math.round(qVal * effRate));
       totQty += qVal;
       totAmt += aVal;
       if (isEveningShift(s.shift)) eQty += qVal;
@@ -617,8 +621,12 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     const mDairySales = dairySales.filter(s => s.date && s.date.startsWith(currentMonthPrefix));
     const mEntries = milkEntries.filter(m => m.date && m.date.startsWith(currentMonthPrefix));
     
-    const custSum = mCustSales.reduce((sum, s) => sum + Number(s.quantity || s.liters || 0), 0);
-    const custAmtSum = mCustSales.reduce((sum, s) => sum + Number(s.amount || ((s.quantity || s.liters || 0) * (s.rate || 70))), 0);
+    const custAmtSum = mCustSales.reduce((sum, s) => {
+      const q = Number(s.quantity || s.liters || 0);
+      const isRate60 = !s.rate || Number(s.rate) === 60;
+      const r = isRate60 ? 70 : Number(s.rate);
+      return sum + (isRate60 ? Math.round(q * 70) : Number(s.amount || Math.round(q * r)));
+    }, 0);
     
     const dairySum = mDairySales.reduce((sum, s) => sum + Number(s.quantity || s.liters || 0), 0);
     const dairyAmtSum = mDairySales.reduce((sum, s) => sum + Number(s.totalAmount || s.amount || 0), 0);
@@ -661,7 +669,13 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
 
   // 3. SALES AGGREGATIONS (Period)
   const periodCustomerTotal = useMemo(() => {
-    return filteredCustomerSales.reduce((sum, r) => sum + Number(r.amount || ((r.quantity || r.liters || 0) * (r.rate || 60))), 0);
+    return filteredCustomerSales.reduce((sum, r) => {
+      const q = Number(r.quantity || r.liters || 0);
+      const isRate60 = !r.rate || Number(r.rate) === 60;
+      const rate = isRate60 ? 70 : Number(r.rate);
+      const amount = isRate60 ? Math.round(q * 70) : Number(r.amount || Math.round(q * rate));
+      return sum + amount;
+    }, 0);
   }, [filteredCustomerSales]);
 
   const periodCustomerLiters = useMemo(() => {
@@ -1945,8 +1959,8 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
                 },
                 { key: "customerName", label: "ग्राहक का नाम" },
                 { key: "quantity", label: "मात्रा (L)", mono: true, render: (v, r) => `${v || r.liters || 0} L` },
-                { key: "rate", label: "दर/L", mono: true, render: (v) => fmt(v || 70) },
-                { key: "amount", label: "कुल राशि", mono: true, render: (v, r) => fmt(v || ((r.quantity || r.liters || 0) * (r.rate || 70))) },
+                { key: "rate", label: "दर/L", mono: true, render: (v) => fmt((!v || v === 60) ? 70 : v) },
+                { key: "amount", label: "कुल राशि", mono: true, render: (v, r) => fmt((!r.rate || r.rate === 60) ? ((r.quantity || r.liters || 0) * 70) : (v || ((r.quantity || r.liters || 0) * (r.rate || 70)))) },
               ]}
               rows={customerFilteredSales}
               onDelete={deleteCustomerSale}

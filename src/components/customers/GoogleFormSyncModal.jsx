@@ -104,7 +104,7 @@ function onFormSubmit(e) {
     } else if (key.indexOf('qty') > -1 || key.indexOf('quantity') > -1 || key.indexOf('मात्रा') > -1 || key.indexOf('लीटर') > -1) {
       payload.quantity = parseFloat(rowData[i]) || 0;
     } else if (key.indexOf('rate') > -1 || key.indexOf('price') > -1 || key.indexOf('दर') > -1) {
-      payload.rate = parseFloat(rowData[i]) || 60;
+      payload.rate = parseFloat(rowData[i]) || 70;
     } else if (key.indexOf('shift') > -1 || key.indexOf('शिफ्ट') > -1) {
       payload.shift = rowData[i];
     } else if (key.indexOf('address') > -1 || key.indexOf('पता') > -1) {

@@ -59,17 +59,54 @@ export const AppProvider = ({ children }) => {
   // Animals
   const [animals, setAnimals] = useState(() => safeGetItem('dairy_animals', []));
 
+  // Helper to normalize milk rates (auto-heal old 60/- to correct 70/- rate)
+  const healCustomerSale = (s) => {
+    if (!s) return s;
+    const r = Number(s.rate);
+    const q = Number(s.quantity || s.liters || 0);
+    if (!r || r === 60 || isNaN(r)) {
+      return { ...s, rate: 70, amount: Math.round(q * 70) };
+    }
+    return s;
+  };
+
+  const healCustomerTransaction = (t) => {
+    if (!t) return t;
+    if (t.type === 'milk_supply') {
+      const r = Number(t.rate);
+      const l = Number(t.liters || 0);
+      if (!r || r === 60 || isNaN(r)) {
+        return {
+          ...t,
+          rate: 70,
+          amount: Math.round(l * 70),
+          note: t.note ? t.note.replace('@ ₹60', '@ ₹70').replace('@ ₹60/L', '@ ₹70/L') : t.note
+        };
+      }
+    }
+    return t;
+  };
+
   // Customers
-  const [customers, setCustomers] = useState(() => safeGetItem('dairy_customers', []));
+  const [customers, setCustomers] = useState(() => {
+    const list = safeGetItem('dairy_customers', []);
+    return list.map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
+  });
 
   // Customer Transactions / Ledger
-  const [customerTransactions, setCustomerTransactions] = useState(() => safeGetItem('dairy_transactions', []));
+  const [customerTransactions, setCustomerTransactions] = useState(() => {
+    const list = safeGetItem('dairy_transactions', []);
+    return list.map(healCustomerTransaction);
+  });
 
   // Milk Production Entries
   const [milkEntries, setMilkEntries] = useState(() => safeGetItem('dairy_milk_entries', []));
 
   // 🥛 1. Customer Sales (from Google Sheets / Direct)
-  const [customerSales, setCustomerSales] = useState(() => safeGetItem('dairy_customer_sales', []));
+  const [customerSales, setCustomerSales] = useState(() => {
+    const list = safeGetItem('dairy_customer_sales', []);
+    return list.map(healCustomerSale);
+  });
 
   // 🏭 2. Dairy Sales (Wholesale / Plant Sales with FAT & SNF)
   const [dairySales, setDairySales] = useState(() => {
@@ -284,18 +321,23 @@ export const AppProvider = ({ children }) => {
                 safeSetItem('dairy_animals', db.animals);
               }
               if (Array.isArray(db.customers) && db.customers.length > 0) {
-                setCustomers(db.customers);
-                safeSetItem('dairy_customers', db.customers);
+                const healedCust = db.customers.map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
+                setCustomers(healedCust);
+                safeSetItem('dairy_customers', healedCust);
               }
               if (Array.isArray(db.customerTransactions)) {
-                setCustomerTransactions(db.customerTransactions);
+                const healedTxns = db.customerTransactions.map(healCustomerTransaction);
+                setCustomerTransactions(healedTxns);
+                safeSetItem('dairy_transactions', healedTxns);
               }
               if (Array.isArray(db.milkEntries)) {
                 setMilkEntries(db.milkEntries);
                 safeSetItem('dairy_milk_entries', db.milkEntries);
               }
               if (Array.isArray(db.customerSales) && db.customerSales.length > 0) {
-                setCustomerSales(db.customerSales);
+                const healedSales = db.customerSales.map(healCustomerSale);
+                setCustomerSales(healedSales);
+                safeSetItem('dairy_customer_sales', healedSales);
                 hasLocalRecords = true;
               }
               if (Array.isArray(db.dairySales)) {
@@ -326,18 +368,23 @@ export const AppProvider = ({ children }) => {
               safeSetItem('dairy_animals', cloudDb.animals);
             }
             if (Array.isArray(cloudDb.customers) && cloudDb.customers.length > 0) {
-              setCustomers(cloudDb.customers);
-              safeSetItem('dairy_customers', cloudDb.customers);
+              const healedCust = cloudDb.customers.map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
+              setCustomers(healedCust);
+              safeSetItem('dairy_customers', healedCust);
             }
             if (Array.isArray(cloudDb.customerTransactions) && cloudDb.customerTransactions.length > 0) {
-              setCustomerTransactions(cloudDb.customerTransactions);
+              const healedTxns = cloudDb.customerTransactions.map(healCustomerTransaction);
+              setCustomerTransactions(healedTxns);
+              safeSetItem('dairy_transactions', healedTxns);
             }
             if (Array.isArray(cloudDb.milkEntries) && cloudDb.milkEntries.length > 0) {
               setMilkEntries(cloudDb.milkEntries);
               safeSetItem('dairy_milk_entries', cloudDb.milkEntries);
             }
             if (Array.isArray(cloudDb.customerSales) && cloudDb.customerSales.length > 0) {
-              setCustomerSales(cloudDb.customerSales);
+              const healedSales = cloudDb.customerSales.map(healCustomerSale);
+              setCustomerSales(healedSales);
+              safeSetItem('dairy_customer_sales', healedSales);
             }
             if (Array.isArray(cloudDb.dairySales) && cloudDb.dairySales.length > 0) {
               setDairySales(cloudDb.dairySales);
@@ -384,10 +431,10 @@ export const AppProvider = ({ children }) => {
           if (change.type === 'added') {
             setCustomerSales(prev => {
               if (prev.some(s => s.id === docData.id)) return prev;
-              return [docData, ...prev];
+              return [healCustomerSale(docData), ...prev];
             });
           } else if (change.type === 'modified') {
-            setCustomerSales(prev => prev.map(s => s.id === docData.id ? { ...s, ...docData } : s));
+            setCustomerSales(prev => prev.map(s => s.id === docData.id ? healCustomerSale({ ...s, ...docData }) : s));
           } else if (change.type === 'removed') {
             setCustomerSales(prev => prev.filter(s => s.id !== docData.id));
           }
@@ -905,7 +952,7 @@ export const AppProvider = ({ children }) => {
       if (!name) return;
 
       const qty = parseFloat(row.quantity || row.liters || row.qty) || 0;
-      const rate = parseFloat(row.rate || row.price) || 60;
+      const rate = parseFloat(row.rate || row.price) || 70;
       const amount = Number(row.amount || Math.round(qty * rate));
       const shift = ((row.shift || 'morning').toLowerCase().includes('ev') || (row.shift || '').includes('शाम')) ? 'evening' : 'morning';
       const date = row.date || dateToday;
@@ -1042,7 +1089,7 @@ export const AppProvider = ({ children }) => {
   // Direct Customer Sale Action (Single manual entry)
   const addCustomerSale = (saleData) => {
     const qty = Number(saleData.quantity) || 0;
-    const rate = Number(saleData.rate) || 60;
+    const rate = Number(saleData.rate) || 70;
     const amount = Number(saleData.amount) || Math.round(qty * rate);
     const d = new Date();
     const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1167,6 +1214,7 @@ export const AppProvider = ({ children }) => {
     const otherCustIdx = headers.findIndex(h => h.includes('other customer') || h.includes('other'));
     const qtyIdx = headers.findIndex(h => h.includes('how much milk') || h.includes('quantity') || h.includes('liters') || h.includes('qty') || h.includes('दूध'));
     const rateIdx = headers.findIndex(h => h === 'rate' || h === 'price' || h.includes('दर') || h.includes('मूल्य'));
+    const totalPaymentIdx = headers.findIndex(h => h.includes('total payment') || h.includes('total amount') || h.includes('amount') || h.includes('कुल भुगतान') || h.includes('राशि'));
     const cashPmtIdx = headers.findIndex(h => h.includes('cash payment') || h.includes('cash') || h.includes('नगद'));
     const mobileIdx = headers.findIndex(h => h.includes('mobile') || h.includes('phone') || h.includes('मोबाइल') || h.includes('फोन'));
     const addressIdx = headers.findIndex(h => h.includes('address') || h.includes('पता') || h.includes('village'));
@@ -1192,12 +1240,21 @@ export const AppProvider = ({ children }) => {
         qty = parseFloat(cols[1]?.replace(/[^0-9.]/g, '')) || 0;
       }
 
-      let rate = 60;
-      if (rateIdx !== -1) {
-        rate = parseFloat(cols[rateIdx]?.replace(/[^0-9.]/g, '')) || 60;
-      } else if (cols.length >= 3) {
-        rate = parseFloat(cols[2]?.replace(/[^0-9.]/g, '')) || 60;
+      let rate = 70;
+      let totalAmountFromSheet = null;
+      if (totalPaymentIdx !== -1 && cols[totalPaymentIdx]) {
+        totalAmountFromSheet = parseFloat(cols[totalPaymentIdx]?.replace(/[^0-9.]/g, '')) || null;
       }
+
+      if (rateIdx !== -1) {
+        rate = parseFloat(cols[rateIdx]?.replace(/[^0-9.]/g, '')) || 70;
+      } else if (totalAmountFromSheet && qty > 0) {
+        rate = Math.round(totalAmountFromSheet / qty) || 70;
+      }
+      if (rate === 60 || !rate || isNaN(rate)) {
+        rate = 70;
+      }
+      const finalAmount = totalAmountFromSheet && totalAmountFromSheet > 0 ? totalAmountFromSheet : Math.round(qty * rate);
 
       let cashPayment = 0;
       if (cashPmtIdx !== -1 && cols[cashPmtIdx]) {
@@ -1239,7 +1296,7 @@ export const AppProvider = ({ children }) => {
           customerName: name,
           quantity: qty,
           rate,
-          amount: Math.round(qty * rate),
+          amount: finalAmount,
           cashPayment,
           shift,
           date,
@@ -1409,7 +1466,7 @@ export const AppProvider = ({ children }) => {
       customRate = arg5 !== null ? Number(arg5) : null;
     }
 
-    const rate = customRate !== null && !isNaN(customRate) ? customRate : (Number(customer.rate) || 60);
+    const rate = customRate !== null && !isNaN(customRate) ? customRate : (Number(customer.rate) || 70);
     const finalQty = qty !== null ? qty : (shift === 'morning' ? customer.morningQty : customer.eveningQty);
     if (finalQty <= 0) return;
 

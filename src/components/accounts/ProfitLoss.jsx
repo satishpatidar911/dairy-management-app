@@ -165,7 +165,7 @@ export const ProfitLoss = () => {
             <span className="text-xs font-bold text-slate-600">Average Milk Price (औसत दूध बिक्री मूल्य)</span>
             <div className="mt-1 flex items-baseline gap-2">
               <span className="text-xl font-extrabold text-slate-800">
-                ₹{stats.totalMilkVolume > 0 ? (totalRevenue / stats.totalMilkVolume).toFixed(1) : 60}/L
+                ₹{stats.totalMilkVolume > 0 ? (totalRevenue / stats.totalMilkVolume).toFixed(1) : 70}/L
               </span>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">Retail & Dairy Collection Avg Rate</p>

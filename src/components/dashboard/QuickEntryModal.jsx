@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Milk, Receipt, CreditCard, CheckCircle2, Layers, Truck, Building2, Users, Calendar } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
@@ -58,7 +58,7 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
     quantity: '',
     fat: '4.5',
     snf: '8.5',
-    rate: '60'
+    rate: '70'
   });
 
   // Bulk Total Milk form state
@@ -79,8 +79,28 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
     customName: '',
     shift: 'morning',
     quantity: '',
-    rate: customers[0]?.rate ? String(customers[0].rate) : '60'
+    rate: customers[0]?.rate ? String(customers[0].rate) : '70'
   });
+
+  // Sync quickCustomerSale with loaded customers list
+  useEffect(() => {
+    if (isOpen && customers && customers.length > 0) {
+      setQuickCustomerSale(prev => {
+        const c = customers.find(x => x.id === prev.customerId) || customers[0];
+        const defaultQty = prev.shift === 'evening' ? (c?.eveningQty || '') : (c?.morningQty || '');
+        if (!prev.customerId || prev.rate === '60' || !prev.rate) {
+          return {
+            ...prev,
+            customerId: c.id,
+            customerName: c.name,
+            rate: c.rate ? String(c.rate) : '70',
+            quantity: prev.quantity || (defaultQty ? String(defaultQty) : '')
+          };
+        }
+        return prev;
+      });
+    }
+  }, [isOpen, customers]);
   const [quickDairySale, setQuickDairySale] = useState({
     date: today,
     dairyName: 'Amul / Saras Chilling Plant (अमूल डेयरी प्लांट)',
@@ -221,7 +241,7 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
         custName = 'सामान्य ग्राहक';
       }
 
-      const rate = Number(quickCustomerSale.rate) || 60;
+      const rate = Number(quickCustomerSale.rate) || 70;
       const amount = Math.round(qty * rate);
 
       addCustomerSale({
@@ -704,7 +724,7 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
                           setQuickCustomerSale({
                             ...quickCustomerSale,
                             customerId: e.target.value,
-                            rate: c?.rate ? String(c.rate) : quickCustomerSale.rate,
+                            rate: c?.rate ? String(c.rate) : (quickCustomerSale.rate || '70'),
                             quantity: defaultQty ? String(defaultQty) : quickCustomerSale.quantity
                           });
                         }}
@@ -715,7 +735,7 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
                         ) : (
                           customers.map(c => (
                             <option key={c.id} value={c.id}>
-                              {c.name} (🌅 {c.morningQty || 0}L · 🌇 {c.eveningQty || 0}L - ₹{c.rate}/L)
+                              {c.name} (🌅 {c.morningQty || 0}L · 🌇 {c.eveningQty || 0}L - ₹{c.rate || 70}/L)
                             </option>
                           ))
                         )}
@@ -741,7 +761,7 @@ export const QuickEntryModal = ({ isOpen, onClose }) => {
                           कुल अनुमानित (₹)
                         </label>
                         <div className="w-full px-2 py-1.5 text-xs font-black text-center rounded-xl bg-slate-100 border border-slate-200 text-emerald-800">
-                          ₹{Math.round((Number(quickCustomerSale.quantity) || 0) * (Number(quickCustomerSale.rate) || 60))}
+                          ₹{Math.round((Number(quickCustomerSale.quantity) || 0) * (Number(quickCustomerSale.rate) || 70))}
                         </div>
                       </div>
                     </div>
