@@ -621,6 +621,7 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     const mDairySales = dairySales.filter(s => s.date && s.date.startsWith(currentMonthPrefix));
     const mEntries = milkEntries.filter(m => m.date && m.date.startsWith(currentMonthPrefix));
     
+    const custSum = mCustSales.reduce((sum, s) => sum + Number(s.quantity || s.liters || 0), 0);
     const custAmtSum = mCustSales.reduce((sum, s) => {
       const q = Number(s.quantity || s.liters || 0);
       const isRate60 = !s.rate || Number(s.rate) === 60;
