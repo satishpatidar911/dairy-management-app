@@ -280,6 +280,16 @@ export const AppProvider = ({ children }) => {
   const isInitialLoadRef = useRef(true);
   const lastLoadTimeRef = useRef(0);
 
+  const customerSalesRef = useRef(customerSales);
+  customerSalesRef.current = customerSales;
+  const customerTransactionsRef = useRef(customerTransactions);
+  customerTransactionsRef.current = customerTransactions;
+  const customersRef = useRef(customers);
+  customersRef.current = customers;
+  const animalsRef = useRef(animals);
+  animalsRef.current = animals;
+  const isSyncingCloudRef = useRef(false);
+
   // Helper to check if running on local development machine
   const isLocalServer = typeof window !== 'undefined' && 
     (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -299,128 +309,543 @@ export const AppProvider = ({ children }) => {
   const loadDataFromDatabase = useCallback(async (forceCloud = false) => {
     try {
       const now = Date.now();
-      // Throttle: Skip cloud refetch if already loaded within the last 60 seconds unless explicitly forced by user
-      if (!forceCloud && now - lastLoadTimeRef.current < 60000) {
+      if (!forceCloud && now - lastLoadTimeRef.current < 20000) {
         return;
       }
       lastLoadTimeRef.current = now;
 
-      let hasLocalRecords = false;
+      // 1. Fetch base data (/api/db on localhost, or /initial_db.json on Netlify)
+      let baseDb = null;
+      try {
+        const url = isLocalServer ? '/api/db' : '/initial_db.json';
+        const res = await fetch(url);
+        if (res.ok) {
+          baseDb = await res.json();
+        }
+      } catch (e) {}
 
-      // 1. Fetch local server disk database (/api/db) ONLY when on localhost
-      if (isLocalServer) {
-        try {
-          const res = await fetch('/api/db');
-          const contentType = res.headers.get('content-type') || '';
-          if (res.ok && contentType.includes('application/json')) {
-            const db = await res.json();
-            if (db && typeof db === 'object') {
-              if (Array.isArray(db.animals) && db.animals.length > 0) {
-                setAnimals(db.animals);
-                safeSetItem('dairy_animals', db.animals);
+      // 2. Fetch live Supabase deliveries & metadata in parallel
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 14); // last 14 days
+      const cutoffIso = cutoffDate.toISOString().slice(0, 10);
+
+      const [recentDeliveriesRes, topDeliveriesRes, cloudDb] = await Promise.all([
+        supabase
+          .from('milk_deliveries')
+          .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
+          .gte('delivery_date', cutoffIso)
+          .order('delivery_date', { ascending: false })
+          .limit(400)
+          .catch(() => ({ data: [] })),
+        supabase
+          .from('milk_deliveries')
+          .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
+          .order('delivery_id', { ascending: false })
+          .limit(60)
+          .catch(() => ({ data: [] })),
+        (!baseDb || forceCloud || !isLocalServer) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
+      ]);
+
+      // 3. COMBINE EVERYTHING IN MEMORY (ZERO INTERMEDIATE RENDERS)
+      let finalAnimals = baseDb?.animals || cloudDb?.animals || animalsRef.current;
+      let finalCustomers = (baseDb?.customers || cloudDb?.customers || customersRef.current).map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
+      let finalTxns = (baseDb?.customerTransactions || cloudDb?.customerTransactions || customerTransactionsRef.current).map(healCustomerTransaction);
+      let finalSales = (baseDb?.customerSales || cloudDb?.customerSales || customerSalesRef.current).map(healCustomerSale);
+      let finalMilkEntries = baseDb?.milkEntries || cloudDb?.milkEntries || [];
+      let finalDairySales = baseDb?.dairySales || cloudDb?.dairySales || [];
+      let finalRateMaster = baseDb?.rateMasterConfig || cloudDb?.rateMasterConfig || null;
+      let finalExpenses = baseDb?.expenses || cloudDb?.expenses || [];
+      let finalFeedStock = baseDb?.feedStock || cloudDb?.feedStock || [];
+      let finalHealthRecords = baseDb?.healthRecords || cloudDb?.healthRecords || [];
+      let finalVaccinations = baseDb?.vaccinations || cloudDb?.vaccinations || [];
+      let finalBreedingRecords = baseDb?.breedingRecords || cloudDb?.breedingRecords || [];
+
+      // Reconcile live Supabase deliveries directly into memory arrays
+      const rawRows = [...(recentDeliveriesRes.data || []), ...(topDeliveriesRes.data || [])];
+      const uniqueCloudMap = new Map();
+      rawRows.forEach(r => {
+        if (r && r.delivery_id && !uniqueCloudMap.has(Number(r.delivery_id))) {
+          uniqueCloudMap.set(Number(r.delivery_id), r);
+        }
+      });
+      const cloudDeliveries = Array.from(uniqueCloudMap.values());
+
+      if (cloudDeliveries.length > 0) {
+        const salesById = new Map();
+        const salesByFp = new Map();
+        finalSales.forEach((s, idx) => {
+          if (s.deliveryId) salesById.set(Number(s.deliveryId), idx);
+          if (s.rawDeliveryId) salesById.set(Number(s.rawDeliveryId), idx);
+          if (s.id && String(s.id).startsWith('DELIV-')) {
+            const parsed = parseInt(String(s.id).replace('DELIV-', ''));
+            if (parsed) salesById.set(parsed, idx);
+          }
+          const fp = `${(s.customerName || '').toLowerCase().trim()}_${s.date}_${(s.shift || 'morning').toLowerCase()}`;
+          if (!salesByFp.has(fp)) salesByFp.set(fp, idx);
+        });
+
+        const custMap = new Map();
+        finalCustomers.forEach(c => {
+          if (c.id) custMap.set(c.id, c);
+          if (c.name) custMap.set(c.name.toLowerCase().trim(), c);
+        });
+
+        const txnsById = new Map();
+        finalTxns.forEach((t, idx) => {
+          if (t.id) txnsById.set(t.id, idx);
+        });
+
+        const newSalesToPrepend = [];
+        const newTxnsToPrepend = [];
+
+        cloudDeliveries.forEach(row => {
+          const dId = Number(row.delivery_id);
+          const date = row.delivery_date;
+          const shift = String(row.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
+          const name = (row.customer_name_original || 'ग्राहक').trim();
+          const qty = Number(row.milk_liters) || 0;
+          const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Math.round(qty * 70);
+          const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
+          const fp = `${name.toLowerCase()}_${date}_${shift}`;
+
+          const existingIdx = salesById.has(dId) ? salesById.get(dId) : (salesByFp.has(fp) ? salesByFp.get(fp) : -1);
+
+          if (existingIdx !== -1) {
+            const existing = finalSales[existingIdx];
+            const oldQty = Number(existing.quantity) || 0;
+            const oldBill = Number(existing.amount) || 0;
+
+            if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name) {
+              const billDiff = bill - oldBill;
+              finalSales[existingIdx] = healCustomerSale({
+                ...existing,
+                deliveryId: dId,
+                rawDeliveryId: dId,
+                id: `DELIV-${dId}`,
+                customerName: name,
+                date,
+                shift,
+                quantity: qty,
+                rate,
+                amount: bill,
+                note: row.other_customer_note || existing.note
+              });
+
+              const targetCust = custMap.get(existing.customerId) || custMap.get(name.toLowerCase());
+              if (targetCust) {
+                targetCust.balance = (Number(targetCust.balance) || 0) + billDiff;
               }
-              if (Array.isArray(db.customers) && db.customers.length > 0) {
-                const healedCust = db.customers.map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
-                setCustomers(healedCust);
-                safeSetItem('dairy_customers', healedCust);
+
+              const txnId = `TXN-DELIV-${dId}`;
+              const tIdx = txnsById.has(txnId) ? txnsById.get(txnId) : -1;
+              if (tIdx !== -1) {
+                finalTxns[tIdx] = healCustomerTransaction({
+                  ...finalTxns[tIdx],
+                  customerName: name,
+                  liters: qty,
+                  rate,
+                  amount: bill,
+                  date,
+                  shift,
+                  note: `Google Sheet/Supabase: ${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} (${qty} L @ ₹${rate})`
+                });
               }
-              if (Array.isArray(db.customerTransactions)) {
-                const healedTxns = db.customerTransactions.map(healCustomerTransaction);
-                setCustomerTransactions(healedTxns);
-                safeSetItem('dairy_transactions', healedTxns);
+            }
+          } else {
+            if (qty > 0 || bill > 0) {
+              let targetCust = (row.customer_id ? custMap.get(`CUST-${row.customer_id}`) : null) || custMap.get(name.toLowerCase());
+
+              if (!targetCust && name) {
+                targetCust = {
+                  id: row.customer_id ? `CUST-${row.customer_id}` : `CUST-${Date.now().toString().slice(-4)}`,
+                  name,
+                  mobile: '',
+                  address: '',
+                  milkType: 'cow',
+                  morningQty: shift === 'morning' ? qty : 0,
+                  eveningQty: shift === 'evening' ? qty : 0,
+                  rate,
+                  balance: bill,
+                  advance: 0,
+                  status: 'active',
+                  joinedDate: date
+                };
+                custMap.set(name.toLowerCase(), targetCust);
+                if (targetCust.id) custMap.set(targetCust.id, targetCust);
+                finalCustomers.unshift(targetCust);
+              } else if (targetCust) {
+                targetCust.balance = (Number(targetCust.balance) || 0) + bill;
               }
-              if (Array.isArray(db.milkEntries)) {
-                setMilkEntries(db.milkEntries);
-                safeSetItem('dairy_milk_entries', db.milkEntries);
-              }
-              if (Array.isArray(db.customerSales) && db.customerSales.length > 0) {
-                const healedSales = db.customerSales.map(healCustomerSale);
-                setCustomerSales(healedSales);
-                safeSetItem('dairy_customer_sales', healedSales);
-                hasLocalRecords = true;
-              }
-              if (Array.isArray(db.dairySales)) {
-                setDairySales(db.dairySales);
-              }
-              if (db.rateMasterConfig) setRateMasterConfig(db.rateMasterConfig);
-              if (Array.isArray(db.expenses)) setExpenses(db.expenses);
-              if (Array.isArray(db.feedStock) && db.feedStock.length > 0) setFeedStock(db.feedStock);
-              if (Array.isArray(db.healthRecords)) setHealthRecords(db.healthRecords);
-              if (Array.isArray(db.vaccinations)) setVaccinations(db.vaccinations);
-              if (Array.isArray(db.breedingRecords)) setBreedingRecords(db.breedingRecords);
-              if (db.googleSheetsConfig) setGoogleSheetsConfig(prev => ({ ...prev, ...db.googleSheetsConfig }));
-              if (Array.isArray(db.syncedRowKeys)) setSyncedRowKeys(db.syncedRowKeys);
+
+              const custId = targetCust ? targetCust.id : (row.customer_id ? `CUST-${row.customer_id}` : '');
+              const newSale = healCustomerSale({
+                id: `DELIV-${dId}`,
+                deliveryId: dId,
+                rawDeliveryId: dId,
+                customerId: custId,
+                customerName: name,
+                date,
+                shift,
+                quantity: qty,
+                rate,
+                amount: bill,
+                source: 'Supabase Database',
+                note: row.other_customer_note || '',
+                timestamp: `${date} ${shift === 'morning' ? '08:00:00' : '18:00:00'}`
+              });
+              newSalesToPrepend.push(newSale);
+
+              const newTxn = healCustomerTransaction({
+                id: `TXN-DELIV-${dId}`,
+                customerId: custId,
+                customerName: name,
+                date,
+                type: 'milk_supply',
+                shift,
+                liters: qty,
+                rate,
+                amount: bill,
+                balanceAfter: targetCust ? targetCust.balance : bill,
+                note: `Google Sheet/Supabase: ${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} (${qty} L @ ₹${rate})`
+              });
+              newTxnsToPrepend.push(newTxn);
             }
           }
-        } catch (localErr) {
-          console.warn('Local /api/db fetch skipped:', localErr);
+        });
+
+        if (newSalesToPrepend.length > 0) {
+          finalSales = [...newSalesToPrepend, ...finalSales];
+        }
+        if (newTxnsToPrepend.length > 0) {
+          finalTxns = [...newTxnsToPrepend, ...finalTxns];
         }
       }
 
-      // 2. Fetch Supabase Cloud Database if requested with forceCloud OR if local DB is empty OR if running online on Netlify
-      if (!hasLocalRecords || forceCloud || !isLocalServer) {
-        try {
-          const cloudDb = await dbService.loadAll();
-          if (cloudDb && typeof cloudDb === 'object') {
-            if (Array.isArray(cloudDb.animals) && cloudDb.animals.length > 0) {
-              setAnimals(cloudDb.animals);
-              safeSetItem('dairy_animals', cloudDb.animals);
-            }
-            if (Array.isArray(cloudDb.customers) && cloudDb.customers.length > 0) {
-              const healedCust = cloudDb.customers.map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
-              setCustomers(healedCust);
-              safeSetItem('dairy_customers', healedCust);
-            }
-            if (Array.isArray(cloudDb.customerTransactions) && cloudDb.customerTransactions.length > 0) {
-              const healedTxns = cloudDb.customerTransactions.map(healCustomerTransaction);
-              setCustomerTransactions(healedTxns);
-              safeSetItem('dairy_transactions', healedTxns);
-            }
-            if (Array.isArray(cloudDb.milkEntries) && cloudDb.milkEntries.length > 0) {
-              setMilkEntries(cloudDb.milkEntries);
-              safeSetItem('dairy_milk_entries', cloudDb.milkEntries);
-            }
-            if (Array.isArray(cloudDb.customerSales) && cloudDb.customerSales.length > 0) {
-              const healedSales = cloudDb.customerSales.map(healCustomerSale);
-              setCustomerSales(healedSales);
-              safeSetItem('dairy_customer_sales', healedSales);
-              const keys = healedSales.map(s => `${(s.customerName || '').toLowerCase().trim()}_${s.date}_${(s.shift || 'morning').toLowerCase()}_${Number(s.quantity || 0)}`);
-              setSyncedRowKeys(prev => [...new Set([...prev, ...keys])]);
-            }
-            if (Array.isArray(cloudDb.dairySales) && cloudDb.dairySales.length > 0) {
-              setDairySales(cloudDb.dairySales);
-            }
-            if (cloudDb.rateMasterConfig) setRateMasterConfig(cloudDb.rateMasterConfig);
-            if (Array.isArray(cloudDb.expenses) && cloudDb.expenses.length > 0) setExpenses(cloudDb.expenses);
-            if (Array.isArray(cloudDb.feedStock) && cloudDb.feedStock.length > 0) setFeedStock(cloudDb.feedStock);
-            if (Array.isArray(cloudDb.healthRecords) && cloudDb.healthRecords.length > 0) setHealthRecords(cloudDb.healthRecords);
-            if (Array.isArray(cloudDb.vaccinations) && cloudDb.vaccinations.length > 0) setVaccinations(cloudDb.vaccinations);
-            if (Array.isArray(cloudDb.breedingRecords) && cloudDb.breedingRecords.length > 0) setBreedingRecords(cloudDb.breedingRecords);
+      // Step 4: ATOMIC DISPATCH TO REACT STATE (Single render!)
+      if (Array.isArray(finalAnimals)) setAnimals(finalAnimals);
+      if (Array.isArray(finalCustomers)) {
+        setCustomers(finalCustomers);
+        safeSetItem('dairy_customers', finalCustomers);
+      }
+      if (Array.isArray(finalTxns)) {
+        setCustomerTransactions(finalTxns);
+        safeSetItem('dairy_transactions', finalTxns);
+      }
+      if (Array.isArray(finalSales)) {
+        setCustomerSales(finalSales);
+        safeSetItem('dairy_customer_sales', finalSales);
+      }
+      if (Array.isArray(finalMilkEntries)) setMilkEntries(finalMilkEntries);
+      if (Array.isArray(finalDairySales)) setDairySales(finalDairySales);
+      if (finalRateMaster) setRateMasterConfig(finalRateMaster);
+      if (Array.isArray(finalExpenses)) setExpenses(finalExpenses);
+      if (Array.isArray(finalFeedStock)) setFeedStock(finalFeedStock);
+      if (Array.isArray(finalHealthRecords)) setHealthRecords(finalHealthRecords);
+      if (Array.isArray(finalVaccinations)) setVaccinations(finalVaccinations);
+      if (Array.isArray(finalBreedingRecords)) setBreedingRecords(finalBreedingRecords);
 
-            // SAVE to local server disk ONLY on local server
-            if (isLocalServer) {
-              fetch('/api/db', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(cloudDb)
-              }).catch(() => {});
-            }
-          }
-        } catch (cloudErr) {
-          console.warn('Cloud background sync error:', cloudErr);
-        }
+      // Save merged database to disk in the background (if local dev server)
+      if (isLocalServer) {
+        fetch('/api/db', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            animals: finalAnimals,
+            customers: finalCustomers,
+            customerTransactions: finalTxns,
+            milkEntries: finalMilkEntries,
+            customerSales: finalSales,
+            dairySales: finalDairySales,
+            rateMasterConfig: finalRateMaster,
+            expenses: finalExpenses,
+            feedStock: finalFeedStock,
+            healthRecords: finalHealthRecords,
+            vaccinations: finalVaccinations,
+            breedingRecords: finalBreedingRecords,
+            googleSheetsConfig,
+            syncedRowKeys
+          })
+        }).catch(() => {});
       }
 
       setIsDbLoaded(true);
     } catch (err) {
-      console.warn('Database fetch warning:', err);
+      console.warn('Database unified load error:', err);
       setIsDbLoaded(true);
     }
-  }, [isLocalServer]);
+  }, [isLocalServer, googleSheetsConfig, syncedRowKeys]);
+
+  // 🚀 Incremental Cloud Sync: Fetches recent deliveries directly from Supabase
+  // Merges new / updated deliveries, recalculates customer ledger & balances,
+  // and saves to disk on local dev server.
+  const syncRecentCloudDeliveries = useCallback(async (isForced = false) => {
+    if (isSyncingCloudRef.current) return 0;
+    isSyncingCloudRef.current = true;
+
+    try {
+      // 1. Fetch recent records: last 14 days and latest by delivery_id
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 14);
+      const cutoffIso = cutoffDate.toISOString().slice(0, 10);
+
+      const [recentByDateRes, recentByIdRes] = await Promise.all([
+        supabase
+          .from('milk_deliveries')
+          .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
+          .gte('delivery_date', cutoffIso)
+          .order('delivery_date', { ascending: false })
+          .limit(400),
+        supabase
+          .from('milk_deliveries')
+          .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
+          .order('delivery_id', { ascending: false })
+          .limit(60)
+      ]);
+
+      const rawRows = [...(recentByDateRes.data || []), ...(recentByIdRes.data || [])];
+      if (rawRows.length === 0) {
+        isSyncingCloudRef.current = false;
+        return 0;
+      }
+
+      // Deduplicate fetched rows by delivery_id
+      const uniqueCloudMap = new Map();
+      rawRows.forEach(r => {
+        if (r && r.delivery_id && !uniqueCloudMap.has(Number(r.delivery_id))) {
+          uniqueCloudMap.set(Number(r.delivery_id), r);
+        }
+      });
+      const cloudDeliveries = Array.from(uniqueCloudMap.values());
+
+      let hasSalesChanges = false;
+      let hasTxnChanges = false;
+      let hasCustomerChanges = false;
+
+      const currentSales = [...customerSalesRef.current];
+      const currentTxns = [...customerTransactionsRef.current];
+      const currentCusts = [...customersRef.current];
+
+      // Build lookups
+      const salesById = new Map();
+      const salesByFp = new Map();
+      currentSales.forEach((s, idx) => {
+        if (s.deliveryId) salesById.set(Number(s.deliveryId), idx);
+        if (s.rawDeliveryId) salesById.set(Number(s.rawDeliveryId), idx);
+        if (s.id && String(s.id).startsWith('DELIV-')) {
+          const parsed = parseInt(String(s.id).replace('DELIV-', ''));
+          if (parsed) salesById.set(parsed, idx);
+        }
+        const fp = `${(s.customerName || '').toLowerCase().trim()}_${s.date}_${(s.shift || 'morning').toLowerCase()}`;
+        if (!salesByFp.has(fp)) salesByFp.set(fp, idx);
+      });
+
+      const custMap = new Map();
+      currentCusts.forEach(c => {
+        if (c.id) custMap.set(c.id, c);
+        if (c.name) custMap.set(c.name.toLowerCase().trim(), c);
+      });
+
+      const txnsById = new Map();
+      currentTxns.forEach((t, idx) => {
+        if (t.id) txnsById.set(t.id, idx);
+      });
+
+      const newSalesToAdd = [];
+      const newTxnsToAdd = [];
+
+      cloudDeliveries.forEach(row => {
+        const dId = Number(row.delivery_id);
+        const date = row.delivery_date;
+        const shift = String(row.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
+        const name = (row.customer_name_original || 'ग्राहक').trim();
+        const qty = Number(row.milk_liters) || 0;
+        const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Math.round(qty * 70);
+        const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
+        const fp = `${name.toLowerCase()}_${date}_${shift}`;
+
+        const existingIdx = salesById.has(dId) ? salesById.get(dId) : (salesByFp.has(fp) ? salesByFp.get(fp) : -1);
+
+        if (existingIdx !== -1) {
+          const existing = currentSales[existingIdx];
+          const oldQty = Number(existing.quantity) || 0;
+          const oldBill = Number(existing.amount) || 0;
+
+          if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name) {
+            const billDiff = bill - oldBill;
+            currentSales[existingIdx] = healCustomerSale({
+              ...existing,
+              deliveryId: dId,
+              rawDeliveryId: dId,
+              id: `DELIV-${dId}`,
+              customerName: name,
+              date,
+              shift,
+              quantity: qty,
+              rate,
+              amount: bill,
+              note: row.other_customer_note || existing.note
+            });
+            hasSalesChanges = true;
+
+            // Adjust customer balance
+            const targetCust = custMap.get(existing.customerId) || custMap.get(name.toLowerCase());
+            if (targetCust) {
+              targetCust.balance = (Number(targetCust.balance) || 0) + billDiff;
+              hasCustomerChanges = true;
+            }
+
+            // Update ledger transaction
+            const txnId = `TXN-DELIV-${dId}`;
+            const tIdx = txnsById.has(txnId) ? txnsById.get(txnId) : -1;
+            if (tIdx !== -1) {
+              currentTxns[tIdx] = healCustomerTransaction({
+                ...currentTxns[tIdx],
+                customerName: name,
+                liters: qty,
+                rate,
+                amount: bill,
+                date,
+                shift,
+                note: `Google Sheet/Supabase: ${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} (${qty} L @ ₹${rate})`
+              });
+              hasTxnChanges = true;
+            }
+          }
+        } else {
+          // Brand new delivery from Supabase
+          if (qty > 0 || bill > 0) {
+            let targetCust = (row.customer_id ? custMap.get(`CUST-${row.customer_id}`) : null) || custMap.get(name.toLowerCase());
+
+            if (!targetCust && name) {
+              targetCust = {
+                id: row.customer_id ? `CUST-${row.customer_id}` : `CUST-${Date.now().toString().slice(-4)}`,
+                name,
+                mobile: '',
+                address: '',
+                milkType: 'cow',
+                morningQty: shift === 'morning' ? qty : 0,
+                eveningQty: shift === 'evening' ? qty : 0,
+                rate,
+                balance: bill,
+                advance: 0,
+                status: 'active',
+                joinedDate: date
+              };
+              custMap.set(name.toLowerCase(), targetCust);
+              if (targetCust.id) custMap.set(targetCust.id, targetCust);
+              currentCusts.unshift(targetCust);
+              hasCustomerChanges = true;
+            } else if (targetCust) {
+              targetCust.balance = (Number(targetCust.balance) || 0) + bill;
+              hasCustomerChanges = true;
+            }
+
+            const custId = targetCust ? targetCust.id : (row.customer_id ? `CUST-${row.customer_id}` : '');
+            const newSale = healCustomerSale({
+              id: `DELIV-${dId}`,
+              deliveryId: dId,
+              rawDeliveryId: dId,
+              customerId: custId,
+              customerName: name,
+              date,
+              shift,
+              quantity: qty,
+              rate,
+              amount: bill,
+              source: 'Supabase Database',
+              note: row.other_customer_note || '',
+              timestamp: `${date} ${shift === 'morning' ? '08:00:00' : '18:00:00'}`
+            });
+            newSalesToAdd.push(newSale);
+
+            const newTxn = healCustomerTransaction({
+              id: `TXN-DELIV-${dId}`,
+              customerId: custId,
+              customerName: name,
+              date,
+              type: 'milk_supply',
+              shift,
+              liters: qty,
+              rate,
+              amount: bill,
+              balanceAfter: targetCust ? targetCust.balance : bill,
+              note: `Google Sheet/Supabase: ${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} (${qty} L @ ₹${rate})`
+            });
+            newTxnsToAdd.push(newTxn);
+          }
+        }
+      });
+
+      const finalSales = newSalesToAdd.length > 0 ? [...newSalesToAdd, ...currentSales] : currentSales;
+      const finalTxns = newTxnsToAdd.length > 0 ? [...newTxnsToAdd, ...currentTxns] : currentTxns;
+
+      if (newSalesToAdd.length > 0 || hasSalesChanges) {
+        setCustomerSales(finalSales);
+        safeSetItem('dairy_customer_sales', finalSales);
+      }
+      if (newTxnsToAdd.length > 0 || hasTxnChanges) {
+        setCustomerTransactions(finalTxns);
+        safeSetItem('dairy_transactions', finalTxns);
+      }
+      if (hasCustomerChanges) {
+        setCustomers([...currentCusts]);
+        safeSetItem('dairy_customers', currentCusts);
+      }
+
+      // If running on local server and changes occurred, persist to disk
+      if ((newSalesToAdd.length > 0 || hasSalesChanges || hasTxnChanges || hasCustomerChanges) && isLocalServer) {
+        fetch('/api/db', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            animals,
+            customers: currentCusts,
+            customerTransactions: finalTxns,
+            milkEntries,
+            customerSales: finalSales,
+            dairySales,
+            rateMasterConfig,
+            expenses,
+            feedStock,
+            healthRecords,
+            vaccinations,
+            breedingRecords,
+            googleSheetsConfig,
+            syncedRowKeys
+          })
+        }).catch(() => {});
+      }
+
+      return newSalesToAdd.length;
+    } catch (err) {
+      console.warn('syncRecentCloudDeliveries error:', err);
+      return 0;
+    } finally {
+      isSyncingCloudRef.current = false;
+    }
+  }, [isLocalServer, animals, milkEntries, dairySales, rateMasterConfig, expenses, feedStock, healthRecords, vaccinations, breedingRecords, googleSheetsConfig, syncedRowKeys]);
 
   useEffect(() => {
     loadDataFromDatabase(true);
   }, [loadDataFromDatabase]);
+
+  // ⚡ Tab Focus Sync: Sync immediately when user switches back from Google Sheets to this tab
+  useEffect(() => {
+    const handleFocus = () => {
+      syncRecentCloudDeliveries();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [syncRecentCloudDeliveries]);
+
+  // ⚡ Periodic Auto-Sync: Poll Supabase every 15 seconds in the background
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      syncRecentCloudDeliveries();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [syncRecentCloudDeliveries]);
 
   // ⚡ INSTANT REAL-TIME SYNC (Sub-second live updates via Supabase WebSockets)
   useEffect(() => {
@@ -431,54 +856,13 @@ export const AppProvider = ({ children }) => {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'milk_deliveries' },
           (payload) => {
-            const { eventType, new: newRow, old: oldRow } = payload;
-            if (eventType === 'INSERT' && newRow) {
-              const liters = Number(newRow.milk_liters) || 0;
-              const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
-              const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
-              const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
-
-              const saleItem = {
-                id: `DELIV-${newRow.delivery_id}`,
-                rawDeliveryId: newRow.delivery_id,
-                customerId: newRow.customer_id ? `CUST-${newRow.customer_id}` : '',
-                customerName: newRow.customer_name_original || 'ग्राहक',
-                date: newRow.delivery_date,
-                shift,
-                quantity: liters,
-                rate,
-                amount: bill,
-                source: 'Supabase Database',
-                note: newRow.other_customer_note || ''
-              };
-
-              setCustomerSales(prev => {
-                if (prev.some(s => s.id === saleItem.id || s.rawDeliveryId === newRow.delivery_id)) return prev;
-                return [healCustomerSale(saleItem), ...prev];
-              });
-            } else if (eventType === 'UPDATE' && newRow) {
-              const liters = Number(newRow.milk_liters) || 0;
-              const bill = newRow.bill_amount !== null && newRow.bill_amount !== undefined ? Number(newRow.bill_amount) : (liters > 0 ? liters * 70 : 0);
-              const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
-              const shift = String(newRow.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
-
-              setCustomerSales(prev => prev.map(s => {
-                if (s.id === `DELIV-${newRow.delivery_id}` || s.rawDeliveryId === newRow.delivery_id) {
-                  return healCustomerSale({
-                    ...s,
-                    customerName: newRow.customer_name_original || s.customerName,
-                    date: newRow.delivery_date,
-                    shift,
-                    quantity: liters,
-                    rate,
-                    amount: bill,
-                    note: newRow.other_customer_note || s.note
-                  });
-                }
-                return s;
-              }));
-            } else if (eventType === 'DELETE' && oldRow) {
-              setCustomerSales(prev => prev.filter(s => s.id !== `DELIV-${oldRow.delivery_id}` && s.rawDeliveryId !== oldRow.delivery_id));
+            const { eventType, old: oldRow } = payload;
+            if (eventType === 'DELETE' && oldRow && oldRow.delivery_id) {
+              const dId = Number(oldRow.delivery_id);
+              setCustomerSales(prev => prev.filter(s => s.id !== `DELIV-${dId}` && s.deliveryId !== dId && s.rawDeliveryId !== dId));
+              setCustomerTransactions(prev => prev.filter(t => t.id !== `TXN-DELIV-${dId}`));
+            } else {
+              syncRecentCloudDeliveries(true);
             }
           }
         )
@@ -490,7 +874,7 @@ export const AppProvider = ({ children }) => {
     } catch (e) {
       console.warn('Supabase realtime init error:', e);
     }
-  }, []);
+  }, [syncRecentCloudDeliveries]);
 
   // Save to Disk Database whenever state changes (debounced, dirty-checked, zero GET overhead)
   useEffect(() => {
@@ -1132,7 +1516,7 @@ export const AppProvider = ({ children }) => {
       setCustomers([...updatedCustomerList]);
       if (newSales.length > 0) {
         setCustomerSales(prev => [...newSales, ...prev]);
-        newSales.forEach(s => dbService.saveCustomerSale(s));
+        dbService.saveCustomerSalesBulk(newSales);
       }
       if (newTransactions.length > 0) {
         setCustomerTransactions(prev => [...newTransactions, ...prev]);
@@ -1278,17 +1662,21 @@ export const AppProvider = ({ children }) => {
     const addressIdx = headers.findIndex(h => h.includes('address') || h.includes('पता') || h.includes('village'));
     const typeIdx = headers.findIndex(h => h.includes('गाय/भैंस') || h.includes('breed') || h.includes('cow/buffalo'));
     const timestampIdx = headers.findIndex(h => h === 'timestamp');
+    const col1Idx = headers.findIndex(h => h.includes('column 1') || h === 'id' || h === 'delivery_id');
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
       if (cols.length < 2) continue;
 
-      let name = nameIdx !== -1 ? cols[nameIdx] : cols[0];
-      if (name === 'OTHER CUSTOMER' && otherCustIdx !== -1 && cols[otherCustIdx]) {
-        name = cols[otherCustIdx];
+      let name = (nameIdx !== -1 ? cols[nameIdx] : cols[0]) || '';
+      const otherName = otherCustIdx !== -1 ? (cols[otherCustIdx] || '').trim() : '';
+      if (name.toUpperCase() === 'OTHER CUSTOMER' || !name) {
+        if (otherName) {
+          name = otherName;
+        }
       }
-      name = (name || '').trim();
+      name = name.replace(/\s+/g, ' ').trim();
       if (!name || name.toLowerCase().includes('name') || name.toLowerCase().includes('नाम')) continue;
 
       let qty = 0;
@@ -1348,6 +1736,7 @@ export const AppProvider = ({ children }) => {
       const address = addressIdx !== -1 ? cols[addressIdx] : '';
       const milkType = typeIdx !== -1 ? (cols[typeIdx].includes('भैंस') || cols[typeIdx].toLowerCase().includes('buf') ? 'buffalo' : 'cow') : 'cow';
       const timestamp = timestampIdx !== -1 ? cols[timestampIdx] : '';
+      const deliveryId = col1Idx !== -1 && cols[col1Idx] ? parseInt(cols[col1Idx].replace(/\D/g, '')) || null : null;
 
       if (name && (qty > 0 || cashPayment > 0)) {
         rows.push({
@@ -1361,7 +1750,8 @@ export const AppProvider = ({ children }) => {
           mobile,
           address,
           milkType,
-          timestamp
+          timestamp,
+          deliveryId
         });
       }
     }
@@ -1978,6 +2368,11 @@ export const AppProvider = ({ children }) => {
     return list;
   }, [feedStock, animals, breedingRecords, todayStr]);
 
+  const reloadFromDatabase = useCallback(async (forceCloud = true) => {
+    await loadDataFromDatabase(forceCloud);
+    await syncRecentCloudDeliveries(true);
+  }, [loadDataFromDatabase, syncRecentCloudDeliveries]);
+
   return (
     <AppContext.Provider
       value={{
@@ -2063,10 +2458,11 @@ export const AppProvider = ({ children }) => {
         // Database Load Status
         isDbLoaded,
 
-        // Data Reset & Demo & Reload
+        // Data Reset & Demo & Reload & Live Cloud Sync
         clearAllData,
         loadDemoData,
-        reloadFromDatabase: loadDataFromDatabase
+        reloadFromDatabase,
+        syncRecentCloudDeliveries
       }}
     >
       {children}

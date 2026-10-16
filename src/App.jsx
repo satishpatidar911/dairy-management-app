@@ -95,11 +95,31 @@ class ErrorBoundary extends React.Component {
 function AppContent() {
   const { t } = useLanguage();
   const { currentUser, isAuthenticated } = useAuth();
-  const { reloadFromDatabase, isDark, toggleTheme } = useApp();
+  const { isDbLoaded, reloadFromDatabase, isDark, toggleTheme } = useApp();
 
   // If user is not logged in, render high-tech LoginPage immediately
   if (!isAuthenticated) {
     return <LoginPage />;
+  }
+
+  // 🛡️ Smooth Zero-Flicker Loader: Waits for Supabase data to load in ONE clean atomic pass
+  if (!isDbLoaded) {
+    return (
+      <div className={`min-h-screen flex flex-col items-center justify-center transition-colors ${isDark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-800'}`}>
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-2xl">🥛</span>
+            </div>
+          </div>
+          <div className="text-center">
+            <h2 className="text-lg font-bold tracking-wide text-emerald-500">SHIVAJI MILK CENTER</h2>
+            <p className="text-xs text-slate-400 mt-1">डेटाबेस लोड हो रहा है, कृपया प्रतीक्षा करें...</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const [activeTab, setActiveTab] = useState(() => {

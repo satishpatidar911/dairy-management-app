@@ -26,13 +26,15 @@ const camelToSnake = (obj) => {
 
 // Bandwidth-Optimized Supabase Query Helper
 // Drastically slashes egress by 99% by requesting only required columns and avoiding bulk multi-page transfers
-async function fetchSupabaseRowsOptimized(tableName, orderColumn = 'delivery_id', ascending = false, columns = '*', limit = 1000) {
+async function fetchSupabaseRowsOptimized(tableName, orderColumn = 'delivery_date', ascending = false, columns = '*', limit = 1000) {
   try {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select(columns)
-      .order(orderColumn, { ascending })
-      .limit(limit);
+    let query = supabase.from(tableName).select(columns);
+    if (tableName === 'milk_deliveries') {
+      query = query.order('delivery_date', { ascending: false }).order('delivery_id', { ascending: false });
+    } else {
+      query = query.order(orderColumn, { ascending });
+    }
+    const { data, error } = await query.limit(limit);
 
     if (error) {
       console.warn(`Query ${tableName} notice:`, error.message);
@@ -268,7 +270,7 @@ export const dbService = {
         supabase.from('farm_profile').select('*').maybeSingle().then(r => r.data),
         supabase.from('animals').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
         supabase.from('customers').select('*').order('customer_name', { ascending: true }).limit(200).then(r => r.data || []),
-        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_id', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
+        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_date', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
         fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, other_customer_note', 500),
         supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
         supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
@@ -541,6 +543,50 @@ export const dbService = {
       return data?.[0];
     } catch (e) {
       console.warn('saveCustomerSale to Supabase error:', e);
+    }
+  },
+
+  async saveCustomerSalesBulk(sales) {
+    if (!Array.isArray(sales) || sales.length === 0) return true;
+    try {
+      const { data: top } = await supabase
+        .from('milk_deliveries')
+        .select('delivery_id')
+        .order('delivery_id', { ascending: false })
+        .limit(1);
+      let nextId = (top && top[0]?.delivery_id ? top[0].delivery_id : 35500) + 1;
+
+      const payloads = sales.map(sale => {
+        const liters = Number(sale.quantity) || 0;
+        const rate = Number(sale.rate) || 70;
+        const amount = Number(sale.amount) || Math.round(liters * rate);
+        const shift = String(sale.shift || 'morning').toUpperCase();
+        const rawCustId = sale.customerId ? parseInt(String(sale.customerId).replace(/\D/g, '')) : null;
+        const delId = sale.deliveryId || nextId++;
+
+        return {
+          delivery_id: delId,
+          delivery_date: sale.date || new Date().toISOString().split('T')[0],
+          delivery_time: shift.includes('EV') ? 'EVENING' : 'MORNING',
+          customer_id: rawCustId || null,
+          customer_name_original: sale.customerName || 'Customer',
+          other_customer_note: sale.note || null,
+          milk_liters: liters,
+          bill_amount: amount,
+          source_timestamp: new Date().toISOString()
+        };
+      });
+
+      // Insert in chunks of 50 to avoid Supabase query size limits
+      for (let i = 0; i < payloads.length; i += 50) {
+        const chunk = payloads.slice(i, i + 50);
+        const { error } = await supabase.from('milk_deliveries').upsert(chunk, { onConflict: 'delivery_id' });
+        if (error) console.error('Bulk saveCustomerSales to Supabase chunk error:', error.message);
+      }
+      return true;
+    } catch (e) {
+      console.warn('saveCustomerSalesBulk error:', e);
+      return false;
     }
   },
 
