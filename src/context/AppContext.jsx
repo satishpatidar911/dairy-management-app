@@ -245,22 +245,23 @@ export const AppProvider = ({ children }) => {
 
   const DEFAULT_GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1-YeMwL36BtMSzMvlbJs8xm3CHWpsm7SsFfRQPlK6-8E/export?format=csv&gid=787113179';
 
-  // 🌐 4. Google Form & Google Sheets Auto-Sync Configuration
+  // 🌐 4. Google Form & Google Sheets Configuration (Manual Sync only, Supabase is Primary DB)
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState(() => {
     const saved = localStorage.getItem('dairy_google_sheets_config');
     if (saved !== null) {
       try {
         const parsed = JSON.parse(saved);
         if (!parsed.sheetUrl) parsed.sheetUrl = DEFAULT_GOOGLE_SHEET_URL;
+        parsed.autoSyncEnabled = false; // Supabase is primary source of truth
         return parsed;
       } catch (e) {}
     }
     return {
       sheetUrl: DEFAULT_GOOGLE_SHEET_URL,
-      autoSyncEnabled: true,
-      syncInterval: 15, // in minutes (optimized to prevent quota exhaustion)
+      autoSyncEnabled: false,
+      syncInterval: 15,
       lastSyncTime: null,
-      lastSyncStatus: 'idle', // 'idle' | 'syncing' | 'success' | 'error'
+      lastSyncStatus: 'idle',
       lastSyncMessage: '',
       lastSyncCount: 0
     };
@@ -343,7 +344,7 @@ export const AppProvider = ({ children }) => {
           .order('delivery_id', { ascending: false })
           .limit(60)
           .catch(() => ({ data: [] })),
-        (!baseDb || forceCloud || !isLocalServer) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
+        (!baseDb) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
       ]);
 
       // 3. COMBINE EVERYTHING IN MEMORY (ZERO INTERMEDIATE RENDERS)
@@ -397,6 +398,7 @@ export const AppProvider = ({ children }) => {
 
         const newSalesToPrepend = [];
         const newTxnsToPrepend = [];
+        const seenBatchFps = new Set();
 
         cloudDeliveries.forEach(row => {
           const dId = Number(row.delivery_id);
@@ -408,14 +410,17 @@ export const AppProvider = ({ children }) => {
           const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
           const fp = `${name.toLowerCase()}_${date}_${shift}`;
 
+          if (seenBatchFps.has(fp)) return; // Prevent any stream duplicates
+          seenBatchFps.add(fp);
+
           const existingIdx = salesById.has(dId) ? salesById.get(dId) : (salesByFp.has(fp) ? salesByFp.get(fp) : -1);
 
           if (existingIdx !== -1) {
             const existing = finalSales[existingIdx];
-            const oldQty = Number(existing.quantity) || 0;
-            const oldBill = Number(existing.amount) || 0;
+            const oldQty = Number(existing.quantity || existing.liters || 0);
+            const oldBill = Number(existing.amount || 0);
 
-            if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name) {
+            if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name || !existing.deliveryId) {
               const billDiff = bill - oldBill;
               finalSales[existingIdx] = healCustomerSale({
                 ...existing,
@@ -579,7 +584,7 @@ export const AppProvider = ({ children }) => {
   // Merges new / updated deliveries, recalculates customer ledger & balances,
   // and saves to disk on local dev server.
   const syncRecentCloudDeliveries = useCallback(async (isForced = false) => {
-    if (isSyncingCloudRef.current) return 0;
+    if (!isDbLoaded || isSyncingCloudRef.current) return 0;
     isSyncingCloudRef.current = true;
 
     try {
@@ -652,6 +657,7 @@ export const AppProvider = ({ children }) => {
 
       const newSalesToAdd = [];
       const newTxnsToAdd = [];
+      const seenBatchFps = new Set();
 
       cloudDeliveries.forEach(row => {
         const dId = Number(row.delivery_id);
@@ -663,14 +669,17 @@ export const AppProvider = ({ children }) => {
         const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
         const fp = `${name.toLowerCase()}_${date}_${shift}`;
 
+        if (seenBatchFps.has(fp)) return;
+        seenBatchFps.add(fp);
+
         const existingIdx = salesById.has(dId) ? salesById.get(dId) : (salesByFp.has(fp) ? salesByFp.get(fp) : -1);
 
         if (existingIdx !== -1) {
           const existing = currentSales[existingIdx];
-          const oldQty = Number(existing.quantity) || 0;
-          const oldBill = Number(existing.amount) || 0;
+          const oldQty = Number(existing.quantity || existing.liters || 0);
+          const oldBill = Number(existing.amount || 0);
 
-          if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name) {
+          if (oldQty !== qty || oldBill !== bill || existing.date !== date || existing.shift !== shift || existing.customerName !== name || !existing.deliveryId) {
             const billDiff = bill - oldBill;
             currentSales[existingIdx] = healCustomerSale({
               ...existing,
@@ -823,7 +832,7 @@ export const AppProvider = ({ children }) => {
     } finally {
       isSyncingCloudRef.current = false;
     }
-  }, [isLocalServer, animals, milkEntries, dairySales, rateMasterConfig, expenses, feedStock, healthRecords, vaccinations, breedingRecords, googleSheetsConfig, syncedRowKeys]);
+  }, [isDbLoaded, isLocalServer, animals, milkEntries, dairySales, rateMasterConfig, expenses, feedStock, healthRecords, vaccinations, breedingRecords, googleSheetsConfig, syncedRowKeys]);
 
   useEffect(() => {
     loadDataFromDatabase(true);
@@ -1864,16 +1873,9 @@ export const AppProvider = ({ children }) => {
     setGoogleSheetsConfig(prev => ({ ...prev, ...newConfig }));
   };
 
-  // Background Automatic Polling Timer for Google Sheets Live Sync (Throttled for Egress Safety)
+  // Background Automatic Polling Timer for Google Sheets Live Sync (Only when user explicitly enables it)
   useEffect(() => {
     if (!googleSheetsConfig.autoSyncEnabled || !googleSheetsConfig.sheetUrl) return;
-
-    // Run initial sync after mount (only if document is visible)
-    const initialTimer = setTimeout(() => {
-      if (typeof document === 'undefined' || !document.hidden) {
-        fetchAndSyncGoogleSheet();
-      }
-    }, 3000);
 
     // Set recurring timer: minimum 10 minutes interval, pauses when tab is hidden
     const intervalMs = Math.max(10, googleSheetsConfig.syncInterval || 15) * 60 * 1000;
@@ -1885,7 +1887,6 @@ export const AppProvider = ({ children }) => {
     }, intervalMs);
 
     return () => {
-      clearTimeout(initialTimer);
       clearInterval(intervalTimer);
     };
   }, [googleSheetsConfig.autoSyncEnabled, googleSheetsConfig.sheetUrl, googleSheetsConfig.syncInterval]);
