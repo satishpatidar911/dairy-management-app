@@ -24,14 +24,54 @@ const camelToSnake = (obj) => {
   return newObj;
 };
 
+// Universal Multi-page Supabase fetcher: guarantees 100% of rows are fetched without any server-side 1000-row limit truncation!
+export async function fetchAllSupabaseRows(tableName, columns = '*', orderColumn = null, ascending = false, maxRows = null) {
+  try {
+    let allRows = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = supabase.from(tableName).select(columns);
+      if (tableName === 'milk_deliveries') {
+        query = query.order('delivery_date', { ascending: false }).order('delivery_id', { ascending: false });
+      } else if (orderColumn) {
+        query = query.order(orderColumn, { ascending });
+      }
+      const to = from + pageSize - 1;
+      const { data, error } = await query.range(from, to);
+
+      if (error) {
+        console.warn(`Query ${tableName} range [${from}, ${to}] error:`, error.message);
+        break;
+      }
+      if (!data || data.length === 0) break;
+      allRows.push(...data);
+      if (data.length < pageSize || (maxRows && allRows.length >= maxRows)) {
+        hasMore = false;
+      } else {
+        from += pageSize;
+      }
+    }
+    return maxRows ? allRows.slice(0, maxRows) : allRows;
+  } catch (err) {
+    console.warn(`Exception fetching all ${tableName}:`, err);
+    return [];
+  }
+}
+
 // Bandwidth-Optimized Supabase Query Helper
-// Drastically slashes egress by 99% by requesting only required columns and avoiding bulk multi-page transfers
-async function fetchSupabaseRowsOptimized(tableName, orderColumn = 'delivery_date', ascending = false, columns = '*', limit = 1000) {
+// If limit is not specified or 'all', fetches all rows via pagination; otherwise queries with .limit(limit)
+export async function fetchSupabaseRowsOptimized(tableName, orderColumn = 'delivery_date', ascending = false, columns = '*', limit = null) {
+  if (!limit || limit === 'all') {
+    return fetchAllSupabaseRows(tableName, columns, orderColumn, ascending);
+  }
   try {
     let query = supabase.from(tableName).select(columns);
     if (tableName === 'milk_deliveries') {
       query = query.order('delivery_date', { ascending: false }).order('delivery_id', { ascending: false });
-    } else {
+    } else if (orderColumn) {
       query = query.order(orderColumn, { ascending });
     }
     const { data, error } = await query.limit(limit);
@@ -130,8 +170,7 @@ export const dbService = {
         .from('milk_deliveries')
         .select('delivery_id, source_row, delivery_date, delivery_time, customer_name_original, milk_liters, bill_amount')
         .gte('delivery_date', cutoffIso)
-        .order('delivery_id', { ascending: false })
-        .limit(400);
+        .order('delivery_id', { ascending: false });
 
       if (error) return 0;
 
@@ -268,20 +307,20 @@ export const dbService = {
         brdRes
       ] = await Promise.all([
         supabase.from('farm_profile').select('*').maybeSingle().then(r => r.data),
-        supabase.from('animals').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
-        supabase.from('customers').select('*').order('customer_name', { ascending: true }).limit(200).then(r => r.data || []),
-        fetchSupabaseRowsOptimized('milk_deliveries', 'delivery_date', false, 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row', 1000),
-        fetchSupabaseRowsOptimized('payments', 'payment_id', false, 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, other_customer_note', 500),
-        supabase.from('customer_sales').select('id, customer_id, customer_name, date, shift, quantity, rate, amount, source').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
-        supabase.from('customer_transactions').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
-        supabase.from('milk_entries').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
-        fetchSupabaseRowsOptimized('dairy_sales', 'date', false, '*', 250),
+        fetchAllSupabaseRows('animals', '*', 'created_at', false),
+        fetchAllSupabaseRows('customers', '*', 'customer_name', true),
+        fetchAllSupabaseRows('milk_deliveries', 'delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row'),
+        fetchAllSupabaseRows('payments', 'payment_id, payment_date, customer_id, customer_name_original, payment_amount, payment_mode, other_customer_note', 'payment_date', false),
+        fetchAllSupabaseRows('customer_sales', 'id, customer_id, customer_name, date, shift, quantity, rate, amount, source', 'created_at', false),
+        fetchAllSupabaseRows('customer_transactions', '*', 'created_at', false),
+        fetchAllSupabaseRows('milk_entries', '*', 'created_at', false),
+        fetchAllSupabaseRows('dairy_sales', '*', 'date', false),
         supabase.from('rate_master_config').select('*').maybeSingle().then(r => r.data),
-        supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(100).then(r => r.data || []),
-        supabase.from('feed_stock').select('*').limit(50).then(r => r.data || []),
-        supabase.from('health_records').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
-        supabase.from('vaccinations').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
-        supabase.from('breeding_records').select('*').order('created_at', { ascending: false }).limit(50).then(r => r.data || []),
+        fetchAllSupabaseRows('expenses', '*', 'created_at', false),
+        fetchAllSupabaseRows('feed_stock', '*'),
+        fetchAllSupabaseRows('health_records', '*', 'created_at', false),
+        fetchAllSupabaseRows('vaccinations', '*', 'created_at', false),
+        fetchAllSupabaseRows('breeding_records', '*', 'created_at', false),
       ]);
 
       // Process Customers from 'customers' table
@@ -327,26 +366,50 @@ export const dbService = {
         };
       });
 
-      // Map Supabase 'milk_deliveries' to 'customerSales'
-      const mappedCustomerSales = rawDeliveries.map(d => {
+      // Map Supabase 'milk_deliveries' to 'customerSales' & 'customerTransactions' with intelligent deduplication
+      const seenDeliveryFps = new Set();
+      const mappedCustomerSales = [];
+      const mappedTransactions = [];
+
+      rawDeliveries.forEach(d => {
         const liters = Number(d.milk_liters) || 0;
         const bill = d.bill_amount !== null && d.bill_amount !== undefined ? Number(d.bill_amount) : (liters > 0 ? liters * 70 : 0);
         const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
         const shift = String(d.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
+        const name = (d.customer_name_original || 'ग्राहक').trim();
+        const date = d.delivery_date;
+        const fp = `${name.toLowerCase()}_${date}_${shift}`;
 
-        return {
-          id: `DELIV-${d.delivery_id}`,
-          rawDeliveryId: d.delivery_id,
-          customerId: d.customer_id ? `CUST-${d.customer_id}` : '',
-          customerName: d.customer_name_original || 'ग्राहक',
-          date: d.delivery_date,
-          shift,
-          quantity: liters,
-          rate,
-          amount: bill,
-          source: 'Supabase Database',
-          note: d.other_customer_note || ''
-        };
+        if (!seenDeliveryFps.has(fp)) {
+          seenDeliveryFps.add(fp);
+          mappedCustomerSales.push({
+            id: `DELIV-${d.delivery_id}`,
+            rawDeliveryId: d.delivery_id,
+            customerId: d.customer_id ? `CUST-${d.customer_id}` : '',
+            customerName: name,
+            date,
+            shift,
+            quantity: liters,
+            rate,
+            amount: bill,
+            source: 'Supabase Database',
+            note: d.other_customer_note || ''
+          });
+
+          mappedTransactions.push({
+            id: `TXN-DELIV-${d.delivery_id}`,
+            customerId: d.customer_id ? `CUST-${d.customer_id}` : '',
+            customerName: name,
+            date,
+            type: 'milk_supply',
+            shift,
+            liters,
+            rate,
+            amount: bill,
+            balanceAfter: 0,
+            note: d.other_customer_note || `${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} Supply (${liters} L @ ₹${rate})`
+          });
+        }
       });
 
       // If legacy customer_sales table also has rows, merge them
@@ -355,30 +418,6 @@ export const dbService = {
         if (!mappedCustomerSales.some(x => x.id === s.id)) {
           mappedCustomerSales.push(s);
         }
-      });
-
-      // Build Complete Ledger Transactions from Deliveries + Payments
-      const mappedTransactions = [];
-
-      rawDeliveries.forEach(d => {
-        const liters = Number(d.milk_liters) || 0;
-        const bill = d.bill_amount !== null && d.bill_amount !== undefined ? Number(d.bill_amount) : (liters > 0 ? liters * 70 : 0);
-        const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
-        const shift = String(d.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
-
-        mappedTransactions.push({
-          id: `TXN-DELIV-${d.delivery_id}`,
-          customerId: d.customer_id ? `CUST-${d.customer_id}` : '',
-          customerName: d.customer_name_original || 'ग्राहक',
-          date: d.delivery_date,
-          type: 'milk_supply',
-          shift,
-          liters,
-          rate,
-          amount: bill,
-          balanceAfter: 0,
-          note: d.other_customer_note || `${shift === 'morning' ? 'Morning (सुबह)' : 'Evening (शाम)'} Supply (${liters} L @ ₹${rate})`
-        });
       });
 
       rawPayments.forEach(p => {

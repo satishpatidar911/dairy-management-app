@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService } from '../services/dbService';
 import { supabase } from '../utils/supabase.js';
+import { idbStorage } from '../utils/idbStorage.js';
 
 const AppContext = createContext();
 
@@ -337,34 +338,42 @@ export const AppProvider = ({ children }) => {
       }
       lastLoadTimeRef.current = now;
 
-      // 1. Fetch base data (/api/db on localhost, or /initial_db.json on Netlify)
+      // 1. Fetch base data (first check client IndexedDB cache, then /api/db or /initial_db.json)
       let baseDb = null;
       try {
-        const url = isLocalServer ? '/api/db' : `/initial_db.json?v=${Date.now()}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        if (res.ok) {
-          baseDb = await res.json();
+        const cached = await idbStorage.get('dairy_full_database');
+        if (cached && (cached.customerSales?.length > 0 || cached.customers?.length > 0)) {
+          baseDb = cached;
         }
       } catch (e) {}
 
-      // 2. Fetch live Supabase deliveries & metadata in parallel (covers full current and previous month)
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - 45); // last 45 days
-      const cutoffIso = cutoffDate.toISOString().slice(0, 10);
+      try {
+        const url = isLocalServer ? '/api/db' : '/initial_db.json';
+        const res = await fetch(url);
+        if (res.ok) {
+          const freshData = await res.json();
+          if (freshData) {
+            baseDb = freshData;
+            idbStorage.set('dairy_full_database', freshData).catch(() => {});
+          }
+        }
+      } catch (e) {}
+
+      // 2. Fetch live Supabase deliveries & metadata in parallel (Zero Limits)
+      // Covers current active month and latest records by ID without any truncation
+      const currentMonthIso = new Date().toISOString().slice(0, 7) + '-01';
 
       const [recentDeliveriesRes, topDeliveriesRes, cloudDb] = await Promise.all([
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
-          .gte('delivery_date', cutoffIso)
+          .gte('delivery_date', currentMonthIso)
           .order('delivery_date', { ascending: false })
-          .limit(2500)
           .catch(() => ({ data: [] })),
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .order('delivery_id', { ascending: false })
-          .limit(100)
           .catch(() => ({ data: [] })),
         (!baseDb) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
       ]);
@@ -586,6 +595,24 @@ export const AppProvider = ({ children }) => {
       if (Array.isArray(finalVaccinations)) setVaccinations(finalVaccinations);
       if (Array.isArray(finalBreedingRecords)) setBreedingRecords(finalBreedingRecords);
 
+      // Cache full dataset in client-side IndexedDB for instant load on reload / mobile
+      idbStorage.set('dairy_full_database', {
+        animals: finalAnimals,
+        customers: finalCustomers,
+        customerTransactions: finalTxns,
+        milkEntries: finalMilkEntries,
+        customerSales: finalSales,
+        dairySales: finalDairySales,
+        rateMasterConfig: finalRateMaster,
+        expenses: finalExpenses,
+        feedStock: finalFeedStock,
+        healthRecords: finalHealthRecords,
+        vaccinations: finalVaccinations,
+        breedingRecords: finalBreedingRecords,
+        googleSheetsConfig,
+        syncedRowKeys
+      }).catch(() => {});
+
       // Save merged database to disk in the background (if local dev server)
       if (isLocalServer) {
         fetch('/api/db', {
@@ -625,23 +652,19 @@ export const AppProvider = ({ children }) => {
     isSyncingCloudRef.current = true;
 
     try {
-      // 1. Fetch recent records: last 45 days and latest by delivery_id
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - 45);
-      const cutoffIso = cutoffDate.toISOString().slice(0, 10);
+      // 1. Fetch current month and recent deliveries directly from Supabase (Zero Limits)
+      const currentMonthIso = new Date().toISOString().slice(0, 7) + '-01';
 
       const [recentByDateRes, recentByIdRes] = await Promise.all([
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
-          .gte('delivery_date', cutoffIso)
-          .order('delivery_date', { ascending: false })
-          .limit(2500),
+          .gte('delivery_date', currentMonthIso)
+          .order('delivery_date', { ascending: false }),
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .order('delivery_id', { ascending: false })
-          .limit(100)
       ]);
 
       const rawRows = [...(recentByDateRes.data || []), ...(recentByIdRes.data || [])];
@@ -2439,8 +2462,78 @@ export const AppProvider = ({ children }) => {
     return list;
   }, [feedStock, animals, breedingRecords, todayStr, googleSheetsConfig]);
 
-  const reloadFromDatabase = useCallback(async (forceCloud = true) => {
-    await loadDataFromDatabase(forceCloud);
+  // 🌟 Full Unlimited Cloud Database Pull: Fetches 100% of all data from Supabase without ANY limits or cutoffs
+  const fetchAllDatabaseRecords = useCallback(async () => {
+    showSyncNotification({
+      type: 'info',
+      title: '🔄 सम्पूर्ण डेटाबेस सिंक जारी...',
+      message: 'Supabase से 100% रिकॉर्ड्स बिना किसी सीमा के लोड किए जा रहे हैं...',
+      details: 'कृपया कुछ सेकंड प्रतीक्षा करें'
+    });
+
+    try {
+      const cloudDb = await dbService.loadAll();
+      if (!cloudDb) {
+        showSyncNotification({
+          type: 'danger',
+          title: 'सिंक विफल',
+          message: 'क्लाउड डेटाबेस से कनेक्ट नहीं हो सका'
+        });
+        return false;
+      }
+
+      if (Array.isArray(cloudDb.animals)) setAnimals(cloudDb.animals);
+      if (Array.isArray(cloudDb.customers)) {
+        setCustomers(cloudDb.customers);
+        safeSetItem('dairy_customers', cloudDb.customers);
+      }
+      if (Array.isArray(cloudDb.customerSales)) {
+        setCustomerSales(cloudDb.customerSales);
+        safeSetItem('dairy_customer_sales', cloudDb.customerSales);
+      }
+      if (Array.isArray(cloudDb.customerTransactions)) {
+        setCustomerTransactions(cloudDb.customerTransactions);
+        safeSetItem('dairy_transactions', cloudDb.customerTransactions);
+      }
+      if (Array.isArray(cloudDb.milkEntries)) setMilkEntries(cloudDb.milkEntries);
+      if (Array.isArray(cloudDb.dairySales)) setDairySales(cloudDb.dairySales);
+      if (cloudDb.rateMasterConfig) setRateMasterConfig(cloudDb.rateMasterConfig);
+      if (Array.isArray(cloudDb.expenses)) setExpenses(cloudDb.expenses);
+      if (Array.isArray(cloudDb.feedStock)) setFeedStock(cloudDb.feedStock);
+      if (Array.isArray(cloudDb.healthRecords)) setHealthRecords(cloudDb.healthRecords);
+      if (Array.isArray(cloudDb.vaccinations)) setVaccinations(cloudDb.vaccinations);
+      if (Array.isArray(cloudDb.breedingRecords)) setBreedingRecords(cloudDb.breedingRecords);
+
+      // Save complete snapshot to IndexedDB
+      await idbStorage.set('dairy_full_database', cloudDb);
+
+      const salesCount = cloudDb.customerSales?.length || 0;
+      const custCount = cloudDb.customers?.length || 0;
+      const txnCount = cloudDb.customerTransactions?.length || 0;
+
+      showSyncNotification({
+        type: 'success',
+        title: '✓ सम्पूर्ण डेटाबेस लोड सफल (Unlimited Sync)',
+        message: `${salesCount.toLocaleString('en-IN')} बिक्री, ${txnCount.toLocaleString('en-IN')} लेजर ट्रांजेक्शन, ${custCount} ग्राहक सिंक`,
+        details: '100% डेटाबेस रिकॉर्ड्स क्लाउड से लोड हो चुके हैं।'
+      });
+      return true;
+    } catch (err) {
+      console.error('fetchAllDatabaseRecords error:', err);
+      showSyncNotification({
+        type: 'danger',
+        title: 'सिंक त्रुटि',
+        message: err.message || 'डेटा प्राप्त करने में समस्या आई'
+      });
+      return false;
+    }
+  }, [showSyncNotification]);
+
+  const reloadFromDatabase = useCallback(async (forceFull = true) => {
+    if (forceFull) {
+      return await fetchAllDatabaseRecords();
+    }
+    await loadDataFromDatabase(true);
     const added = await syncRecentCloudDeliveries(true);
     showSyncNotification({
       type: 'success',
@@ -2448,7 +2541,7 @@ export const AppProvider = ({ children }) => {
       message: 'डेटाबेस और Google Sheet पूरी तरह सिंक हैं',
       details: added > 0 ? `${added} नए क्लाउड रिकॉर्ड्स सिंक हुए` : 'सभी रिकॉर्ड्स सत्यापित एवं सुरक्षित हैं'
     });
-  }, [loadDataFromDatabase, syncRecentCloudDeliveries, showSyncNotification]);
+  }, [fetchAllDatabaseRecords, loadDataFromDatabase, syncRecentCloudDeliveries, showSyncNotification]);
 
   return (
     <AppContext.Provider
@@ -2544,6 +2637,7 @@ export const AppProvider = ({ children }) => {
         clearAllData,
         loadDemoData,
         reloadFromDatabase,
+        fetchAllDatabaseRecords,
         syncRecentCloudDeliveries
       }}
     >

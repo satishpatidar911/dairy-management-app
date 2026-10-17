@@ -14,7 +14,8 @@ import {
   X,
   Award,
   CreditCard,
-  Building2
+  Building2,
+  Sparkles
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
@@ -26,13 +27,31 @@ import { DairyPlantReport } from './DairyPlantReport';
 
 export const ReportsHub = () => {
   const { t } = useLanguage();
-  const { milkEntries, expenses, customers, animals, stats } = useApp();
+  const { milkEntries, expenses, customers, animals, stats, customerSales = [] } = useApp();
   const { farmProfile } = useAuth();
 
-  const [reportType, setReportType] = useState('customer_due_matrix'); // customer_due_matrix, month_conclusion, daily_milk, customer_khata, expense_report, animal_performance
+  const [reportType, setReportType] = useState('customer_due_matrix'); // customer_due_matrix, month_conclusion, all_sales, daily_milk, customer_khata, expense_report, animal_performance
   const [dateRange, setDateRange] = useState('this_month');
   const [animalSearch, setAnimalSearch] = useState('');
   const [animalTypeFilter, setAnimalTypeFilter] = useState('all'); // 'all' | 'with_milk' | 'cow' | 'buffalo'
+  const [salesSearch, setSalesSearch] = useState('');
+  const [salesMonthFilter, setSalesMonthFilter] = useState('all');
+
+  const filteredSales = React.useMemo(() => {
+    return (customerSales || []).filter(s => {
+      if (salesMonthFilter !== 'all') {
+        if (!s.date || !s.date.startsWith(salesMonthFilter)) return false;
+      }
+      if (salesSearch.trim()) {
+        const q = salesSearch.toLowerCase().trim();
+        const name = (s.customerName || '').toLowerCase();
+        const date = (s.date || '').toLowerCase();
+        const shift = (s.shift || '').toLowerCase();
+        return name.includes(q) || date.includes(q) || shift.includes(q);
+      }
+      return true;
+    });
+  }, [customerSales, salesMonthFilter, salesSearch]);
 
   // Animal performance ranking
   const animalPerformance = animals.map(animal => {
@@ -252,6 +271,19 @@ export const ReportsHub = () => {
         </button>
 
         <button
+          onClick={() => setReportType('all_sales')}
+          className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+            reportType === 'all_sales'
+              ? 'option-active-light'
+              : 'option-inactive-dark'
+          }`}
+        >
+          <Sparkles className="w-5 h-5 mb-1.5 text-emerald-500" />
+          <h4 className="font-bold text-xs">All Sales Data (सम्पूर्ण बिक्री)</h4>
+          <p className="text-[10px] mt-0.5 opacity-80 font-medium">100% डेटाबेस रिकॉर्ड्स व एक्सपोर्ट</p>
+        </button>
+
+        <button
           onClick={() => setReportType('daily_milk')}
           className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer ${
             reportType === 'daily_milk'
@@ -311,6 +343,117 @@ export const ReportsHub = () => {
         <DairyPlantReport initialPlant="HARIHAR DAIRY" />
       ) : reportType === 'month_conclusion' ? (
         <MonthWiseConclusionTable />
+      ) : reportType === 'all_sales' ? (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-card p-5 space-y-4 print:p-0 print:border-0 print:shadow-none">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3 no-print print:hidden">
+            <div>
+              <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                <span>Complete Customer Sales Ledger</span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 font-bold">
+                  {customerSales.length.toLocaleString('en-IN')} Entries (100% Unrestricted)
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                डेटाबेस से सीधे प्राप्त सम्पूर्ण ऐतिहासिक व ताज़ा दूध बिक्री रिकॉर्ड्स
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const exportRows = (filteredSales || []).map((s, idx) => ({
+                    'S.No': idx + 1,
+                    'Delivery ID': s.deliveryId || s.rawDeliveryId || '',
+                    'Date': s.date || '',
+                    'Shift': s.shift === 'evening' ? 'EVENING' : 'MORNING',
+                    'Customer Name': s.customerName || '',
+                    'Quantity (L)': s.quantity || s.liters || 0,
+                    'Rate (₹)': s.rate || 70,
+                    'Total Amount (₹)': s.amount || 0,
+                    'Source': s.source || 'Database',
+                    'Note': s.note || ''
+                  }));
+                  exportToCSV(exportRows, 'Shivaji_Milk_All_Sales_Complete');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download Complete CSV ({filteredSales.length.toLocaleString('en-IN')})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Filter Bar */}
+          <div className="flex flex-wrap items-center gap-3 no-print print:hidden">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="ग्राहक का नाम, तारीख (YYYY-MM-DD), या शिफ्ट खोजें..."
+                value={salesSearch}
+                onChange={(e) => setSalesSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl text-xs border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+              />
+            </div>
+
+            <select
+              value={salesMonthFilter}
+              onChange={(e) => setSalesMonthFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl text-xs border border-slate-200 bg-slate-50 text-slate-800 font-semibold focus:outline-none"
+            >
+              <option value="all">सभी महीने (All Months - {customerSales.length})</option>
+              <option value="2026-10">October 2026</option>
+              <option value="2026-09">September 2026</option>
+              <option value="2026-08">August 2026</option>
+              <option value="2026-07">July 2026</option>
+              <option value="2026-06">June 2026</option>
+              <option value="2026-05">May 2026</option>
+              <option value="2026-04">April 2026</option>
+              <option value="2026-03">March 2026</option>
+            </select>
+          </div>
+
+          {/* Sales Table */}
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
+                <tr>
+                  <th className="px-3 py-2.5">#</th>
+                  <th className="px-3 py-2.5">Date (तारीख)</th>
+                  <th className="px-3 py-2.5">Shift (शिफ्ट)</th>
+                  <th className="px-3 py-2.5">Customer Name (ग्राहक का नाम)</th>
+                  <th className="px-3 py-2.5 text-right">Qty (L)</th>
+                  <th className="px-3 py-2.5 text-right">Rate (₹/L)</th>
+                  <th className="px-3 py-2.5 text-right">Amount (रुपये)</th>
+                  <th className="px-3 py-2.5">Source / Note</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredSales.slice(0, 500).map((s, idx) => (
+                  <tr key={s.id || idx} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{idx + 1}</td>
+                    <td className="px-3 py-2 font-medium text-slate-600">{s.date}</td>
+                    <td className="px-3 py-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${s.shift === 'evening' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {s.shift === 'evening' ? 'EVENING' : 'MORNING'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 font-bold text-slate-800">{s.customerName}</td>
+                    <td className="px-3 py-2 text-right font-black text-emerald-600">{s.quantity || s.liters} L</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-600">₹{s.rate || 70}</td>
+                    <td className="px-3 py-2 text-right font-bold text-slate-900">₹{s.amount || Math.round((s.quantity || 0) * (s.rate || 70))}</td>
+                    <td className="px-3 py-2 text-slate-400 text-[10px] truncate max-w-[150px]">{s.note || s.source || 'Database'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredSales.length > 500 && (
+            <p className="text-[11px] text-slate-400 text-center">
+              तालिका में पहले 500 रिकॉर्ड्स प्रदर्शित हैं। संपूर्ण {filteredSales.length.toLocaleString('en-IN')} रिकॉर्ड्स प्राप्त करने हेतु "Download Complete CSV" बटन दबाएं।
+            </p>
+          )}
+        </div>
       ) : (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-card p-5 space-y-4 print:p-0 print:border-0 print:shadow-none">
         {/* REPORT 1: MILK REPORT */}
