@@ -363,7 +363,16 @@ export const AppProvider = ({ children }) => {
       // Covers current active month and latest records by ID without any truncation
       const currentMonthIso = new Date().toISOString().slice(0, 7) + '-01';
 
-      const [recentDeliveriesRes, topDeliveriesRes, cloudDb] = await Promise.all([
+      const [
+        recentDeliveriesRes,
+        topDeliveriesRes,
+        cloudBreedingRes,
+        cloudHealthRes,
+        cloudVacRes,
+        cloudExpensesRes,
+        cloudAnimalsRes,
+        cloudDb
+      ] = await Promise.all([
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
@@ -375,22 +384,161 @@ export const AppProvider = ({ children }) => {
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .order('delivery_id', { ascending: false })
           .catch(() => ({ data: [] })),
+        supabase
+          .from('breeding_records')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .catch(() => ({ data: [] })),
+        supabase
+          .from('health_records')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .catch(() => ({ data: [] })),
+        supabase
+          .from('vaccinations')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .catch(() => ({ data: [] })),
+        supabase
+          .from('expenses')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .catch(() => ({ data: [] })),
+        supabase
+          .from('animals')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .catch(() => ({ data: [] })),
         (!baseDb) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
       ]);
 
       // 3. COMBINE EVERYTHING IN MEMORY (ZERO INTERMEDIATE RENDERS)
       let finalAnimals = baseDb?.animals || cloudDb?.animals || animalsRef.current;
+      if (Array.isArray(cloudAnimalsRes?.data) && cloudAnimalsRes.data.length > 0) {
+        const animMap = new Map();
+        finalAnimals.forEach(a => { if (a.id) animMap.set(a.id, a); });
+        cloudAnimalsRes.data.forEach(a => {
+          animMap.set(a.id, {
+            ...animMap.get(a.id),
+            id: a.id,
+            tagNo: a.tag_no || a.tagNo,
+            name: a.name,
+            type: a.type || 'buffalo',
+            breed: a.breed,
+            gender: a.gender || 'female',
+            origin: a.origin || 'purchased',
+            dob: a.dob,
+            purchaseDate: a.purchase_date,
+            purchasePrice: Number(a.purchase_price || 0),
+            motherTag: a.mother_tag,
+            weight: Number(a.weight || 450),
+            dailyCapacity: Number(a.daily_capacity || 0),
+            status: a.status || 'milking',
+            lactationNo: Number(a.lactation_no || 1),
+            photo: a.photo || animMap.get(a.id)?.photo || null,
+            notes: a.notes
+          });
+        });
+        finalAnimals = Array.from(animMap.values());
+      }
+
       let finalCustomers = (baseDb?.customers || cloudDb?.customers || customersRef.current).map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
       let finalTxns = (baseDb?.customerTransactions || cloudDb?.customerTransactions || customerTransactionsRef.current).map(healCustomerTransaction);
       let finalSales = (baseDb?.customerSales || cloudDb?.customerSales || customerSalesRef.current).map(healCustomerSale);
       let finalMilkEntries = baseDb?.milkEntries || cloudDb?.milkEntries || [];
       let finalDairySales = baseDb?.dairySales || cloudDb?.dairySales || [];
       let finalRateMaster = baseDb?.rateMasterConfig || cloudDb?.rateMasterConfig || null;
+
       let finalExpenses = baseDb?.expenses || cloudDb?.expenses || [];
+      if (Array.isArray(cloudExpensesRes?.data) && cloudExpensesRes.data.length > 0) {
+        const expMap = new Map();
+        finalExpenses.forEach(e => { if (e.id) expMap.set(e.id, e); });
+        cloudExpensesRes.data.forEach(e => {
+          expMap.set(e.id, {
+            id: e.id,
+            category: e.category,
+            title: e.title,
+            amount: Number(e.amount || 0),
+            date: e.date,
+            payee: e.payee,
+            paymentMethod: e.payment_method || 'cash',
+            notes: e.notes
+          });
+        });
+        finalExpenses = Array.from(expMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      }
+
       let finalFeedStock = baseDb?.feedStock || cloudDb?.feedStock || [];
+
       let finalHealthRecords = baseDb?.healthRecords || cloudDb?.healthRecords || [];
+      if (Array.isArray(cloudHealthRes?.data) && cloudHealthRes.data.length > 0) {
+        const hltMap = new Map();
+        finalHealthRecords.forEach(h => { if (h.id) hltMap.set(h.id, h); });
+        cloudHealthRes.data.forEach(h => {
+          hltMap.set(h.id, {
+            id: h.id,
+            animalId: h.animal_id,
+            animalName: h.animal_name,
+            date: h.date,
+            disease: h.disease,
+            diagnosis: h.diagnosis,
+            treatment: h.treatment,
+            doctor: h.doctor,
+            cost: Number(h.cost || 0),
+            medicine: h.medicine
+          });
+        });
+        finalHealthRecords = Array.from(hltMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      }
+
       let finalVaccinations = baseDb?.vaccinations || cloudDb?.vaccinations || [];
+      if (Array.isArray(cloudVacRes?.data) && cloudVacRes.data.length > 0) {
+        const vacMap = new Map();
+        finalVaccinations.forEach(v => { if (v.id) vacMap.set(v.id, v); });
+        cloudVacRes.data.forEach(v => {
+          vacMap.set(v.id, {
+            id: v.id,
+            vaccineName: v.vaccine_name,
+            target: v.target,
+            nextDueDate: v.next_due_date,
+            status: v.status,
+            notes: v.notes
+          });
+        });
+        finalVaccinations = Array.from(vacMap.values()).sort((a, b) => new Date(b.nextDueDate || 0) - new Date(a.nextDueDate || 0));
+      }
+
+      // Breeding Records: Merge all Supabase breeding records into memory (giving precedence to cloud data)
       let finalBreedingRecords = baseDb?.breedingRecords || cloudDb?.breedingRecords || [];
+      if (Array.isArray(cloudBreedingRes?.data) && cloudBreedingRes.data.length > 0) {
+        const brdMap = new Map();
+        finalBreedingRecords.forEach(b => { if (b.id) brdMap.set(b.id, b); });
+        cloudBreedingRes.data.forEach(b => {
+          let tech = b.technician || '';
+          let notes = '';
+          const noteMatch = tech.match(/\((.*?)\)$/);
+          if (noteMatch) {
+            notes = noteMatch[1];
+            tech = tech.replace(/\s*\(.*?\)$/, '').trim();
+          }
+          brdMap.set(b.id, {
+            id: b.id,
+            animalId: b.animal_id,
+            animalName: b.animal_name,
+            aiDate: b.ai_date,
+            bullStrawTag: b.bull_id || '',
+            bullId: b.bull_id || '',
+            technicianName: tech,
+            technician: tech,
+            expectedCalvingDate: b.expected_calving_date,
+            status: b.status || 'inseminated',
+            isPregnant: b.status === 'pregnant' || b.status === 'inseminated',
+            notes: notes,
+            createdAt: b.created_at
+          });
+        });
+        finalBreedingRecords = Array.from(brdMap.values()).sort((a, b) => new Date(b.aiDate || b.createdAt || 0) - new Date(a.aiDate || a.createdAt || 0));
+      }
 
       // Reconcile live Supabase deliveries directly into memory arrays
       const rawRows = [...(recentDeliveriesRes.data || []), ...(topDeliveriesRes.data || [])];
@@ -2190,23 +2338,35 @@ export const AppProvider = ({ children }) => {
       id: brd.id || `BRD-${Date.now().toString().slice(-4)}`,
       status: brd.status || 'inseminated'
     };
-    setBreedingRecords(prev => [newBrd, ...prev]);
+    setBreedingRecords(prev => {
+      const updated = [newBrd, ...prev.filter(r => r.id !== newBrd.id)];
+      safeSetItem('dairy_breeding_records', updated);
+      return updated;
+    });
     dbService.saveBreedingRecord(newBrd);
   };
 
   const updateBreedingRecord = (id, updatedFields) => {
-    setBreedingRecords(prev => prev.map(rec => {
-      if (rec.id === id) {
-        const updated = { ...rec, ...updatedFields };
-        dbService.saveBreedingRecord(updated);
-        return updated;
-      }
-      return rec;
-    }));
+    setBreedingRecords(prev => {
+      const updatedList = prev.map(rec => {
+        if (rec.id === id) {
+          const updated = { ...rec, ...updatedFields };
+          dbService.saveBreedingRecord(updated);
+          return updated;
+        }
+        return rec;
+      });
+      safeSetItem('dairy_breeding_records', updatedList);
+      return updatedList;
+    });
   };
 
   const deleteBreedingRecord = (id) => {
-    setBreedingRecords(prev => prev.filter(rec => rec.id !== id));
+    setBreedingRecords(prev => {
+      const updated = prev.filter(rec => rec.id !== id);
+      safeSetItem('dairy_breeding_records', updated);
+      return updated;
+    });
     dbService.deleteBreedingRecord(id);
   };
 
