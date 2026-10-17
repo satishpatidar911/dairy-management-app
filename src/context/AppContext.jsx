@@ -104,7 +104,18 @@ export const AppProvider = ({ children }) => {
   // 🥛 1. Customer Sales (from Google Sheets / Direct)
   const [customerSales, setCustomerSales] = useState(() => {
     const list = safeGetItem('dairy_customer_sales', []);
-    return list.map(healCustomerSale);
+    const healed = list.map(healCustomerSale);
+    const unique = [];
+    const seen = new Set();
+    healed.forEach(s => {
+      const name = (s.customerName || '').toLowerCase().trim();
+      const fp = `${name}_${s.date}_${(s.shift || 'morning').toLowerCase()}`;
+      if (!seen.has(fp)) {
+        seen.add(fp);
+        unique.push(s);
+      }
+    });
+    return unique;
   });
 
   // 🏭 2. Dairy Sales (Wholesale / Plant Sales with FAT & SNF)
@@ -318,8 +329,8 @@ export const AppProvider = ({ children }) => {
       // 1. Fetch base data (/api/db on localhost, or /initial_db.json on Netlify)
       let baseDb = null;
       try {
-        const url = isLocalServer ? '/api/db' : '/initial_db.json';
-        const res = await fetch(url);
+        const url = isLocalServer ? '/api/db' : `/initial_db.json?v=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store' });
         if (res.ok) {
           baseDb = await res.json();
         }
@@ -524,6 +535,21 @@ export const AppProvider = ({ children }) => {
         if (newTxnsToPrepend.length > 0) {
           finalTxns = [...newTxnsToPrepend, ...finalTxns];
         }
+      }
+
+      // Step 3.1: Strict In-Memory Deduplication (Scrubs any historical duplicate merges)
+      if (Array.isArray(finalSales)) {
+        const uniqueSales = [];
+        const seenFps = new Set();
+        finalSales.forEach(s => {
+          const name = (s.customerName || '').toLowerCase().trim();
+          const fp = `${name}_${s.date}_${(s.shift || 'morning').toLowerCase()}`;
+          if (!seenFps.has(fp)) {
+            seenFps.add(fp);
+            uniqueSales.push(s);
+          }
+        });
+        finalSales = uniqueSales;
       }
 
       // Step 4: ATOMIC DISPATCH TO REACT STATE (Single render!)
