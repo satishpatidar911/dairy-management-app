@@ -347,9 +347,9 @@ export const AppProvider = ({ children }) => {
         }
       } catch (e) {}
 
-      // 2. Fetch live Supabase deliveries & metadata in parallel
+      // 2. Fetch live Supabase deliveries & metadata in parallel (covers full current and previous month)
       const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - 14); // last 14 days
+      cutoffDate.setDate(cutoffDate.getDate() - 45); // last 45 days
       const cutoffIso = cutoffDate.toISOString().slice(0, 10);
 
       const [recentDeliveriesRes, topDeliveriesRes, cloudDb] = await Promise.all([
@@ -358,13 +358,13 @@ export const AppProvider = ({ children }) => {
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .gte('delivery_date', cutoffIso)
           .order('delivery_date', { ascending: false })
-          .limit(400)
+          .limit(2500)
           .catch(() => ({ data: [] })),
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .order('delivery_id', { ascending: false })
-          .limit(60)
+          .limit(100)
           .catch(() => ({ data: [] })),
         (!baseDb) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
       ]);
@@ -625,9 +625,9 @@ export const AppProvider = ({ children }) => {
     isSyncingCloudRef.current = true;
 
     try {
-      // 1. Fetch recent records: last 14 days and latest by delivery_id
+      // 1. Fetch recent records: last 45 days and latest by delivery_id
       const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - 14);
+      cutoffDate.setDate(cutoffDate.getDate() - 45);
       const cutoffIso = cutoffDate.toISOString().slice(0, 10);
 
       const [recentByDateRes, recentByIdRes] = await Promise.all([
@@ -636,12 +636,12 @@ export const AppProvider = ({ children }) => {
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .gte('delivery_date', cutoffIso)
           .order('delivery_date', { ascending: false })
-          .limit(400),
+          .limit(2500),
         supabase
           .from('milk_deliveries')
           .select('delivery_id, delivery_date, delivery_time, customer_id, customer_name_original, milk_liters, bill_amount, other_customer_note, source_row')
           .order('delivery_id', { ascending: false })
-          .limit(60)
+          .limit(100)
       ]);
 
       const rawRows = [...(recentByDateRes.data || []), ...(recentByIdRes.data || [])];
