@@ -65,7 +65,7 @@ export const BreedingTracker = () => {
     aiDate: new Date().toISOString().split('T')[0],
     bullStrawTag: 'SAH-SUPER-88',
     technicianName: 'डॉक्टर',
-    status: 'pregnant',
+    status: 'inseminated',
     isPregnant: true,
     expectedCalvingDate: '',
     notes: ''
@@ -104,6 +104,7 @@ export const BreedingTracker = () => {
       ...initialFormState,
       animalId: defaultTag,
       aiDate: today,
+      status: 'inseminated',
       expectedCalvingDate: initialCalving
     });
     setIsModalOpen(true);
@@ -230,7 +231,45 @@ export const BreedingTracker = () => {
     setIsModalOpen(true);
   };
 
+  // Calculate accurate days elapsed since AI (गर्भाधान हुए कुल दिन)
+  const getDaysSinceAI = (aiDateStr) => {
+    if (!aiDateStr) return 0;
+    const parts = String(aiDateStr).trim().split('-');
+    if (parts.length !== 3) return 0;
+    const aiDateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    if (isNaN(aiDateObj.getTime())) return 0;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    aiDateObj.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.floor((now.getTime() - aiDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+  };
+
+  // 🔔 Animals due for 60-day pregnancy diagnosis check
+  const pdDueRecords = breedingRecords.filter(r => {
+    const isPending = r.status === 'inseminated' || (!r.status && !r.isPregnant);
+    return isPending && r.status !== 'pregnant' && r.status !== 'failed' && r.status !== 'calved' && getDaysSinceAI(r.aiDate) >= 60;
+  });
+
+  // Upcoming AI checks (less than 60 days, ordered with highest days first)
+  const upcomingPdRecords = breedingRecords
+    .filter(r => {
+      const isPending = r.status === 'inseminated' || (!r.status && !r.isPregnant);
+      const days = getDaysSinceAI(r.aiDate);
+      return isPending && r.status !== 'pregnant' && r.status !== 'failed' && r.status !== 'calved' && days < 60;
+    })
+    .sort((a, b) => getDaysSinceAI(b.aiDate) - getDaysSinceAI(a.aiDate));
+
   const filteredRecords = breedingRecords.filter(rec => {
+    if (selectedTab === 'pd_due') {
+      const isPending = rec.status === 'inseminated' || (!rec.status && !rec.isPregnant);
+      if (!isPending || rec.status === 'pregnant' || rec.status === 'failed' || rec.status === 'calved') return false;
+      if (getDaysSinceAI(rec.aiDate) < 60) return false;
+    } else if (selectedTab === 'pregnant') {
+      if (rec.status !== 'pregnant' && !(!rec.status && rec.isPregnant)) return false;
+    } else if (selectedTab !== 'all') {
+      if (rec.status !== selectedTab) return false;
+    }
+
     if (!searchRecord.trim()) return true;
     const q = searchRecord.toLowerCase().trim();
     return (
@@ -247,6 +286,7 @@ export const BreedingTracker = () => {
   // Calculate Category Counts
   const counts = {
     all: breedingRecords.length,
+    pd_due: pdDueRecords.length,
     inseminated: breedingRecords.filter(r => r.status === 'inseminated').length,
     pregnant: breedingRecords.filter(r => r.status === 'pregnant' || (!r.status && r.isPregnant)).length,
     failed: breedingRecords.filter(r => r.status === 'failed').length,
@@ -304,8 +344,7 @@ export const BreedingTracker = () => {
     const isDueSoon = diffDays <= 30 && diffDays >= 0;
 
     // Calculate days elapsed since AI was performed
-    const aiDateObj = new Date(rec.aiDate);
-    const daysSinceAI = Math.max(0, Math.floor((new Date() - aiDateObj) / (1000 * 60 * 60 * 24)));
+    const daysSinceAI = getDaysSinceAI(rec.aiDate);
     const isPDDue = rec.status === 'inseminated' && daysSinceAI >= 60;
 
     const getStatusBadge = () => {
@@ -328,7 +367,7 @@ export const BreedingTracker = () => {
           isDueSoon
             ? 'bg-purple-50/70 border-purple-300 shadow-md ring-1 ring-purple-300'
             : isPDDue
-            ? 'bg-amber-50/50 border-amber-300 shadow-sm ring-1 ring-amber-300'
+            ? 'bg-gradient-to-br from-amber-50/90 to-orange-50/70 border-amber-400 shadow-md ring-2 ring-amber-300/80'
             : rec.status === 'failed'
             ? 'bg-slate-50/60 border-slate-200 opacity-90'
             : 'bg-white border-slate-200 shadow-card hover:shadow-card-hover'
@@ -355,8 +394,8 @@ export const BreedingTracker = () => {
             <div className="flex flex-col items-end gap-1 flex-shrink-0">
               {rec.status === 'inseminated' ? (
                 isPDDue ? (
-                  <span className="px-2.5 py-1 rounded-full bg-amber-200 text-amber-900 text-xs font-bold animate-pulse flex items-center gap-1 border border-amber-300">
-                    <BellRing className="w-3.5 h-3.5 text-amber-800" />
+                  <span className="px-2.5 py-1 rounded-full bg-amber-500 text-white text-xs font-black animate-pulse flex items-center gap-1 border border-amber-600 shadow-xs">
+                    <BellRing className="w-3.5 h-3.5" />
                     <span>🔔 गर्भ जाँच समय (60+ दिन)</span>
                   </span>
                 ) : (
@@ -410,6 +449,39 @@ export const BreedingTracker = () => {
             </div>
           </div>
 
+          {/* 60-Day Pregnancy Diagnosis Check: Alert Banner OR Countdown Progress Bar */}
+          {rec.status === 'inseminated' && (
+            isPDDue ? (
+              <div className="mt-2.5 p-2.5 rounded-xl bg-amber-500/15 border border-amber-300 text-amber-950 text-xs shadow-xs">
+                <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                  <BellRing className="w-4 h-4 text-amber-600 animate-bounce" />
+                  <span>गर्भ जाँच का समय हो गया! ({daysSinceAI} दिन — 60 दिन पूर्ण)</span>
+                </div>
+                <p className="text-[11px] text-amber-800 mt-1 leading-snug">
+                  डॉक्टर से गर्भाशय की जाँच (PD) करवाएं और नीचे दिए बटन पर क्लिक करके स्थिति तुरंत दर्ज करें:
+                </p>
+              </div>
+            ) : (
+              <div className="mt-2.5 p-2.5 rounded-xl bg-blue-50/80 border border-blue-200/80 text-xs space-y-1.5 shadow-xs">
+                <div className="flex items-center justify-between text-[11px] text-blue-900 font-bold">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                    <span>गर्भ जाँच उल्टी गिनती: <strong>{daysSinceAI} / 60 दिन</strong></span>
+                  </span>
+                  <span className="text-purple-700 font-extrabold bg-purple-100/80 px-2 py-0.5 rounded-md">
+                    {60 - daysSinceAI} दिन बाद जाँच
+                  </span>
+                </div>
+                <div className="w-full bg-blue-200/60 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-blue-500 to-indigo-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, Math.round((daysSinceAI / 60) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            )
+          )}
+
           {rec.notes && (
             <div className="mt-2.5 text-xs text-purple-900 bg-purple-50/80 p-2 rounded-lg border border-purple-100 italic">
               "{rec.notes}"
@@ -421,8 +493,12 @@ export const BreedingTracker = () => {
         <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-col gap-2">
           {/* Direct 1-Click Status Toggles */}
           {rec.status === 'inseminated' && (
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
-              <span className="text-[10px] font-bold text-slate-600 px-1.5 whitespace-nowrap">गर्भ जाँच:</span>
+            <div className={`flex items-center gap-1.5 p-1.5 rounded-xl border ${
+              isPDDue ? 'bg-amber-100/90 border-amber-300 shadow-xs' : 'bg-slate-100/80 border-slate-200'
+            }`}>
+              <span className={`text-[10px] font-extrabold px-1.5 whitespace-nowrap ${isPDDue ? 'text-amber-900' : 'text-slate-600'}`}>
+                {isPDDue ? 'जाँच परिणाम:' : 'गर्भ स्थिति:'}
+              </span>
               <button
                 type="button"
                 onClick={() => handleQuickStatusChange(rec.id, 'pregnant')}
@@ -548,6 +624,115 @@ export const BreedingTracker = () => {
         </button>
       </div>
 
+      {/* 🔔 60-Day Pregnancy Diagnosis Due Alert Banner */}
+      {pdDueRecords.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100/70 border-2 border-amber-400 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3.5 animate-in fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-sm flex items-center justify-center flex-shrink-0 animate-bounce">
+                <BellRing className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">
+                    🔔 गर्भ जाँच अलर्ट (Pregnancy Diagnosis Due): {pdDueRecords.length} पशुओं का 60 दिन पूर्ण!
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black tracking-wide uppercase">
+                    Action Required
+                  </span>
+                </div>
+                <p className="text-xs text-slate-700 mt-1 leading-relaxed">
+                  इन पशुओं का गर्भाधान (AI) हुए <strong>60 दिन या अधिक</strong> बीत चुके हैं। कृपया पशु चिकित्सक से गर्भ जाँच (PD Check) करवाकर यहीं से 1-क्लिक में <strong>"गर्भ ठहर गया"</strong> या <strong>"खाली"</strong> दर्ज करें।
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSelectedTab('pd_due')}
+              className="self-start sm:self-center px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <span>केवल जाँच योग्य देखें ({pdDueRecords.length})</span>
+            </button>
+          </div>
+
+          {/* Quick Action Mini-Cards for Due Animals */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2 border-t border-amber-200">
+            {pdDueRecords.map(rec => {
+              const days = getDaysSinceAI(rec.aiDate);
+              return (
+                <div key={`alert-due-${rec.id}`} className="bg-white/95 p-3 rounded-xl border border-amber-300 shadow-xs flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono text-[10px] font-bold">
+                        {rec.animalId}
+                      </span>
+                      <strong className="text-xs text-slate-900 truncate max-w-[130px]">{rec.animalName}</strong>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 text-[10px] font-black border border-amber-300">
+                      {days} दिन हुए
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 flex items-center justify-between">
+                    <span>AI: {rec.aiDate}</span>
+                    <span>सीमन: <strong className="text-purple-700">{rec.bullStrawTag || rec.bullId || 'N/A'}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickStatusChange(rec.id, 'pregnant')}
+                      className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+                      title="गर्भ ठहर गया (Confirm Pregnant)"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>✓ गर्भ ठहर गया</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`क्या ${rec.animalName || rec.animalId} खाली रह गई है?`)) {
+                          handleQuickStatusChange(rec.id, 'failed');
+                        }
+                      }}
+                      className="py-1.5 px-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+                      title="खाली (Failed)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>✕ खाली</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Informative Upcoming PD Schedule Info Card */}
+      {upcomingPdRecords.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-blue-200/80 rounded-2xl p-3.5 sm:p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-blue-100 text-blue-800 text-base flex-shrink-0">
+              📋
+            </span>
+            <div>
+              <strong className="text-slate-800 text-xs sm:text-sm block">
+                गर्भ जाँच अनुसूची (Pregnancy Check Schedule - 60 दिन का नियम)
+              </strong>
+              <span className="text-[11px] text-slate-600 block mt-0.5">
+                {pdDueRecords.length === 0 ? '✓ वर्तमान में कोई 60-दिन चेक अति-लंबित नहीं है। ' : ''}
+                अगली संभावित जाँच: <strong>{upcomingPdRecords[0]?.animalName}</strong> ({getDaysSinceAI(upcomingPdRecords[0]?.aiDate)} दिन हुए — <strong>{60 - getDaysSinceAI(upcomingPdRecords[0]?.aiDate)} दिन बाद</strong> चेक होगा)
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-900 font-bold text-[11px] border border-blue-200 whitespace-nowrap">
+              कुल {upcomingPdRecords.length} पशु AI निगरानी में
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* CATEGORY TABS & VIEW CONTROLS */}
       <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         {/* Top: Category Filter Tabs */}
@@ -566,6 +751,27 @@ export const BreedingTracker = () => {
               selectedTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'
             }`}>
               {counts.all}
+            </span>
+          </button>
+
+          {/* 🔔 60-Day PD Due Filter Tab */}
+          <button
+            type="button"
+            onClick={() => setSelectedTab('pd_due')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 border ${
+              selectedTab === 'pd_due'
+                ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                : counts.pd_due > 0
+                ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 animate-pulse'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <BellRing className={`w-3.5 h-3.5 ${selectedTab === 'pd_due' ? 'text-white' : 'text-amber-600'}`} />
+            <span>गर्भ जाँच ड्यू (60+ दिन)</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+              selectedTab === 'pd_due' ? 'bg-white/25 text-white' : counts.pd_due > 0 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-800'
+            }`}>
+              {counts.pd_due}
             </span>
           </button>
 
@@ -705,7 +911,24 @@ export const BreedingTracker = () => {
       ) : (
         /* SINGLE TAB VIEW / FLAT GRID VIEW */
         <div className="space-y-4">
-          {selectedTab !== 'all' && (
+          {selectedTab === 'pd_due' && (
+            <div className="p-4 rounded-2xl border bg-gradient-to-r from-amber-50 to-orange-50 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+              <div>
+                <h3 className="font-bold text-sm sm:text-base flex items-center gap-2 text-amber-900">
+                  <BellRing className="w-4 h-4 text-amber-600 animate-bounce" />
+                  <span>गर्भ जाँच ड्यू (Pregnancy Diagnosis Due - 60+ Days)</span>
+                </h3>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  इन पशुओं का गर्भाधान (AI) हुए 60 दिन या अधिक हो चुके हैं। डॉक्टर से गर्भ जाँच करवाकर <strong>'गर्भ ठहर गया'</strong> या <strong>'खाली'</strong> दर्ज करें।
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-black bg-amber-500 text-white shadow-xs self-start sm:self-center">
+                {counts.pd_due} पशु जाँच योग्य
+              </span>
+            </div>
+          )}
+
+          {selectedTab !== 'all' && selectedTab !== 'pd_due' && (
             (() => {
               const currentCat = categoryDefs.find(c => c.id === selectedTab);
               if (!currentCat) return null;
@@ -727,6 +950,7 @@ export const BreedingTracker = () => {
             {filteredRecords
               .filter(rec => {
                 if (selectedTab === 'all') return true;
+                if (selectedTab === 'pd_due') return (rec.status === 'inseminated' || (!rec.status && !rec.isPregnant)) && rec.status !== 'pregnant' && rec.status !== 'failed' && rec.status !== 'calved' && getDaysSinceAI(rec.aiDate) >= 60;
                 if (selectedTab === 'pregnant') return rec.status === 'pregnant' || (!rec.status && rec.isPregnant);
                 return rec.status === selectedTab;
               })

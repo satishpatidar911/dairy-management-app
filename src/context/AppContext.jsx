@@ -2606,6 +2606,38 @@ export const AppProvider = ({ children }) => {
       }
     });
 
+    // 3b. 60-Day Pregnancy Diagnosis (PD / गर्भ जाँच) alerts (AI हुए 60 दिन या अधिक)
+    (breedingRecords || [])
+      .filter(b => {
+        const isPendingCheck = b.status === 'inseminated' || (!b.status && !b.isPregnant);
+        return isPendingCheck && b.status !== 'pregnant' && b.status !== 'failed' && b.status !== 'calved' && b.aiDate;
+      })
+      .forEach(b => {
+        const parts = String(b.aiDate).trim().split('-');
+        if (parts.length !== 3) return;
+        const aiDateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        if (isNaN(aiDateObj.getTime())) return;
+        
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        aiDateObj.setHours(0, 0, 0, 0);
+        const daysPassed = Math.max(0, Math.floor((now.getTime() - aiDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+
+        if (daysPassed >= 60) {
+          const isOverdue = daysPassed >= 90;
+          list.push({
+            id: `alert-pd-${b.id}`,
+            type: isOverdue ? 'danger' : 'warning',
+            severity: isOverdue ? 'high' : 'medium',
+            title: `गर्भ जाँच आवश्यक (${daysPassed} दिन): ${b.animalName || b.animalId}`,
+            message: `${b.animalName || b.animalId} का गर्भाधान (AI) हुए ${daysPassed} दिन बीत चुके हैं (AI तारीख: ${b.aiDate})। डॉक्टर से गर्भ जाँच (Pregnancy Diagnosis) करवाएं और स्थिति दर्ज करें।`,
+            module: 'breeding',
+            recordId: b.id,
+            date: todayStr
+          });
+        }
+      });
+
     // 4. Google Sheet Sync alert / notification
     if (googleSheetsConfig?.lastSyncTime) {
       list.push({
