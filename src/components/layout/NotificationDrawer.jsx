@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, AlertTriangle, Syringe, Calendar, HeartPulse, Wheat, ArrowRight } from 'lucide-react';
+import { X, AlertTriangle, Syringe, Calendar, HeartPulse, Wheat, ArrowRight, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useApp } from '../../context/AppContext';
 
@@ -11,6 +11,8 @@ export const NotificationDrawer = ({ isOpen, onClose, onNavigate }) => {
 
   const getIcon = (module) => {
     switch (module) {
+      case 'sync':
+        return <RefreshCw className="w-5 h-5 text-emerald-500 animate-spin-slow" />;
       case 'feed':
         return <Wheat className="w-5 h-5 text-amber-500" />;
       case 'health':

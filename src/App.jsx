@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AuthProvider, useAuth, ROLES } from './context/AuthContext';
 import { AppProvider, useApp } from './context/AppContext';
@@ -95,7 +96,7 @@ class ErrorBoundary extends React.Component {
 function AppContent() {
   const { t } = useLanguage();
   const { currentUser, isAuthenticated } = useAuth();
-  const { isDbLoaded, reloadFromDatabase, isDark, toggleTheme } = useApp();
+  const { isDbLoaded, reloadFromDatabase, isDark, toggleTheme, syncToast, setSyncToast } = useApp();
 
   // If user is not logged in, render high-tech LoginPage immediately
   if (!isAuthenticated) {
@@ -286,6 +287,37 @@ function AppContent() {
         isOpen={isFarmSettingsOpen}
         onClose={() => setIsFarmSettingsOpen(false)}
       />
+
+      {/* 🚀 Real-Time Live Sync Toast Notification */}
+      {syncToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full shadow-2xl rounded-2xl p-4 border flex items-start gap-3 backdrop-blur-md transition-all border-emerald-500/50 bg-slate-900/95 text-white animate-fade-in no-print print:hidden">
+          <div className={`p-2 rounded-xl mt-0.5 ${syncToast.type === 'danger' ? 'bg-rose-500/20 text-rose-400' : (syncToast.type === 'info' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400')}`}>
+            {syncToast.type === 'danger' ? <AlertCircle size={20} /> : (syncToast.type === 'info' ? <Info size={20} /> : <CheckCircle2 size={20} />)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-bold text-white tracking-wide truncate">
+                {syncToast.title}
+              </h4>
+              <button 
+                onClick={() => setSyncToast(null)} 
+                className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer transition-colors"
+                title="Dismiss"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-xs text-emerald-300 font-semibold mt-1">
+              {syncToast.message}
+            </p>
+            {syncToast.details && (
+              <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                {syncToast.details}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

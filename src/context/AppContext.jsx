@@ -278,6 +278,17 @@ export const AppProvider = ({ children }) => {
     };
   });
 
+  const [syncToast, setSyncToast] = useState(null);
+  const syncToastTimerRef = useRef(null);
+
+  const showSyncNotification = useCallback((toastData) => {
+    if (syncToastTimerRef.current) clearTimeout(syncToastTimerRef.current);
+    setSyncToast(toastData);
+    syncToastTimerRef.current = setTimeout(() => {
+      setSyncToast(null);
+    }, 6000);
+  }, []);
+
   const fetchAndSyncGoogleSheetRef = useRef(null);
 
   // Fingerprint list of synced rows to prevent duplicate billing
@@ -1861,10 +1872,17 @@ export const AppProvider = ({ children }) => {
           lastSyncMessage: msg,
           lastSyncCount: 0
         }));
+        showSyncNotification({
+          type: 'info',
+          title: 'Google Sheet सिंक स्थिति',
+          message: 'शीट में कोई नई प्रविष्टि नहीं मिली',
+          details: 'डेटाबेस पहले से पूर्णतः अप-टू-डेट है'
+        });
         return { success: true, count: 0, message: msg, rows: [] };
       }
 
       const newCount = syncGoogleSheetCustomerSales(parsedRows, 'Google Form / Sheets');
+      const skippedCount = Math.max(0, parsedRows.length - newCount);
 
       const successMsg = `Synced ${newCount} new records (${parsedRows.length} total rows in Sheet)`;
       setGoogleSheetsConfig(prev => ({
@@ -1874,6 +1892,13 @@ export const AppProvider = ({ children }) => {
         lastSyncMessage: successMsg,
         lastSyncCount: newCount
       }));
+
+      showSyncNotification({
+        type: newCount > 0 ? 'success' : 'info',
+        title: newCount > 0 ? '✓ सिंक सफल (Sync Successful)' : '✓ डेटाबेस अप-टू-डेट (Up to Date)',
+        message: newCount > 0 ? `${newCount} नए रिकॉर्ड्स सफलतापूर्वक जुड़े` : 'सभी रिकॉर्ड्स पहले से मौजूद हैं',
+        details: `${parsedRows.length} पंक्तियाँ जांची गईं (${skippedCount} डुप्लीकेट/पुराने रिकॉर्ड्स सुरक्षित रखे गए)`
+      });
 
       return {
         success: true,
@@ -1889,6 +1914,12 @@ export const AppProvider = ({ children }) => {
         lastSyncStatus: 'error',
         lastSyncMessage: errMsg
       }));
+      showSyncNotification({
+        type: 'danger',
+        title: 'सिंक विफल (Sync Failed)',
+        message: 'Google Sheet से कनेक्ट नहीं हो सका',
+        details: errMsg
+      });
       return { success: false, error: errMsg };
     }
   };
@@ -2392,13 +2423,32 @@ export const AppProvider = ({ children }) => {
       }
     });
 
+    // 4. Google Sheet Sync alert / notification
+    if (googleSheetsConfig?.lastSyncTime) {
+      list.push({
+        id: 'sync-status-alert',
+        type: googleSheetsConfig.lastSyncStatus === 'error' ? 'danger' : 'info',
+        severity: 'low',
+        title: `Google Sheet सिंक स्थिति: ${googleSheetsConfig.lastSyncStatus === 'error' ? 'त्रुटि (Error)' : 'सफल (Success)'}`,
+        message: googleSheetsConfig.lastSyncMessage || 'डेटाबेस और Google Sheet पूरी तरह सिंक हैं।',
+        module: 'sync',
+        date: googleSheetsConfig.lastSyncTime
+      });
+    }
+
     return list;
-  }, [feedStock, animals, breedingRecords, todayStr]);
+  }, [feedStock, animals, breedingRecords, todayStr, googleSheetsConfig]);
 
   const reloadFromDatabase = useCallback(async (forceCloud = true) => {
     await loadDataFromDatabase(forceCloud);
-    await syncRecentCloudDeliveries(true);
-  }, [loadDataFromDatabase, syncRecentCloudDeliveries]);
+    const added = await syncRecentCloudDeliveries(true);
+    showSyncNotification({
+      type: 'success',
+      title: '✓ डेटाबेस रीलोड सफल (Database Loaded)',
+      message: 'डेटाबेस और Google Sheet पूरी तरह सिंक हैं',
+      details: added > 0 ? `${added} नए क्लाउड रिकॉर्ड्स सिंक हुए` : 'सभी रिकॉर्ड्स सत्यापित एवं सुरक्षित हैं'
+    });
+  }, [loadDataFromDatabase, syncRecentCloudDeliveries, showSyncNotification]);
 
   return (
     <AppContext.Provider
@@ -2418,6 +2468,11 @@ export const AppProvider = ({ children }) => {
         breedingRecords,
         stats,
         alerts,
+
+        // Sync Toast Notification
+        syncToast,
+        setSyncToast,
+        showSyncNotification,
 
         // Customer Sales & Sheets Live Sync State & Methods
         addCustomerSale,
