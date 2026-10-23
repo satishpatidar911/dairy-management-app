@@ -53,7 +53,10 @@ const FONT_IMPORT = `
 @import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
 `;
 
-const fmt = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
+const fmt = (n) => {
+  const num = Number(n || 0);
+  return "₹" + (Number.isInteger(num) ? num.toLocaleString("en-IN") : num.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 2 }));
+};
 
 // Helper to reliably check if a shift is Evening / Night (avoids substring collisions like 'morning'.includes('ni'))
 const isEveningShift = (shiftVal) => {
@@ -497,9 +500,10 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
       }
       const item = map.get(name);
       const q = Number(s.quantity || s.liters || 0);
-      const isRate60 = !s.rate || Number(s.rate) === 60;
-      const effRate = isRate60 ? 70 : Number(s.rate);
-      const a = isRate60 ? Math.round(q * 70) : Number(s.amount || Math.round(q * effRate));
+      const effRate = Number(s.rate || 70);
+      const a = (s.amount !== undefined && s.amount !== null && !isNaN(Number(s.amount)) && Number(s.amount) > 0)
+        ? Number(s.amount)
+        : Number((q * effRate).toFixed(2));
       item.count++;
       if (isEveningShift(s.shift)) {
         item.eveningLiters = Number((item.eveningLiters + q).toFixed(2));
@@ -528,9 +532,10 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     let mQty = 0, eQty = 0, totQty = 0, totAmt = 0;
     customerFilteredSales.forEach(s => {
       const qVal = Number(s.quantity || s.liters || 0);
-      const isRate60 = !s.rate || Number(s.rate) === 60;
-      const effRate = isRate60 ? 70 : Number(s.rate);
-      const aVal = isRate60 ? Math.round(qVal * 70) : Number(s.amount || Math.round(qVal * effRate));
+      const effRate = Number(s.rate || 70);
+      const aVal = (s.amount !== undefined && s.amount !== null && !isNaN(Number(s.amount)) && Number(s.amount) > 0)
+        ? Number(s.amount)
+        : Number((qVal * effRate).toFixed(2));
       totQty += qVal;
       totAmt += aVal;
       if (isEveningShift(s.shift)) eQty += qVal;
@@ -569,9 +574,9 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     return sales > 0 ? sales : entries;
   }, [todayMilkEntries, todayCustSales, todayDairySalesList]);
 
-  const todayMorningYield = Number((stats?.morningMilk !== undefined && stats?.morningMilk !== null && stats?.morningMilk > 0 ? stats.morningMilk : rawMorningYield).toFixed(1));
-  const todayEveningYield = Number((stats?.eveningMilk !== undefined && stats?.eveningMilk !== null && stats?.eveningMilk > 0 ? stats.eveningMilk : rawEveningYield).toFixed(1));
-  const todayTotal = Number((todayMorningYield + todayEveningYield).toFixed(1));
+  const todayMorningYield = Number((stats?.morningMilk !== undefined && stats?.morningMilk !== null && stats?.morningMilk > 0 ? stats.morningMilk : rawMorningYield).toFixed(2));
+  const todayEveningYield = Number((stats?.eveningMilk !== undefined && stats?.eveningMilk !== null && stats?.eveningMilk > 0 ? stats.eveningMilk : rawEveningYield).toFixed(2));
+  const todayTotal = Number((todayMorningYield + todayEveningYield).toFixed(2));
 
   // Period Milk Calculations (Sum of Customer Sales + Dairy Sales + Milking Entries)
   const periodMilkMorning = useMemo(() => {
@@ -624,9 +629,11 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
     const custSum = mCustSales.reduce((sum, s) => sum + Number(s.quantity || s.liters || 0), 0);
     const custAmtSum = mCustSales.reduce((sum, s) => {
       const q = Number(s.quantity || s.liters || 0);
-      const isRate60 = !s.rate || Number(s.rate) === 60;
-      const r = isRate60 ? 70 : Number(s.rate);
-      return sum + (isRate60 ? Math.round(q * 70) : Number(s.amount || Math.round(q * r)));
+      const effRate = Number(s.rate || 70);
+      const amt = (s.amount !== undefined && s.amount !== null && !isNaN(Number(s.amount)) && Number(s.amount) > 0)
+        ? Number(s.amount)
+        : Number((q * effRate).toFixed(2));
+      return sum + amt;
     }, 0);
     
     const dairySum = mDairySales.reduce((sum, s) => sum + Number(s.quantity || s.liters || 0), 0);
@@ -670,13 +677,14 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
 
   // 3. SALES AGGREGATIONS (Period)
   const periodCustomerTotal = useMemo(() => {
-    return filteredCustomerSales.reduce((sum, r) => {
+    return Number(filteredCustomerSales.reduce((sum, r) => {
       const q = Number(r.quantity || r.liters || 0);
-      const isRate60 = !r.rate || Number(r.rate) === 60;
-      const rate = isRate60 ? 70 : Number(r.rate);
-      const amount = isRate60 ? Math.round(q * 70) : Number(r.amount || Math.round(q * rate));
+      const effRate = Number(r.rate || 70);
+      const amount = (r.amount !== undefined && r.amount !== null && !isNaN(Number(r.amount)) && Number(r.amount) > 0)
+        ? Number(r.amount)
+        : Number((q * effRate).toFixed(2));
       return sum + amount;
-    }, 0);
+    }, 0).toFixed(2));
   }, [filteredCustomerSales]);
 
   const periodCustomerLiters = useMemo(() => {
@@ -1305,7 +1313,7 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
             <span>•</span>
             <span>📦 {customerFilteredSales.length + filteredDairySales.length} प्रविष्टियाँ</span>
             <span>•</span>
-            <span>🥛 {Number(((customerFilter && activeCustomerStats ? activeCustomerStats.totalLiters : periodCustomerLiters) + periodDairyLiters).toFixed(1))} L कुल दूध</span>
+            <span>🥛 {Number(((customerFilter && activeCustomerStats ? activeCustomerStats.totalLiters : periodCustomerLiters) + periodDairyLiters).toFixed(2))} L कुल दूध</span>
           </div>
         </div>
       </section>
@@ -1959,9 +1967,9 @@ export const Dashboard = ({ onNavigate, onOpenQuickEntry, onOpenFarmSettings }) 
                   }
                 },
                 { key: "customerName", label: "ग्राहक का नाम" },
-                { key: "quantity", label: "मात्रा (L)", mono: true, render: (v, r) => `${v || r.liters || 0} L` },
-                { key: "rate", label: "दर/L", mono: true, render: (v) => fmt((!v || v === 60) ? 70 : v) },
-                { key: "amount", label: "कुल राशि", mono: true, render: (v, r) => fmt((!r.rate || r.rate === 60) ? ((r.quantity || r.liters || 0) * 70) : (v || ((r.quantity || r.liters || 0) * (r.rate || 70)))) },
+                { key: "quantity", label: "मात्रा (L)", mono: true, render: (v, r) => `${Number((v !== undefined && v !== null ? v : (r.liters || 0)))} L` },
+                { key: "rate", label: "दर/L", mono: true, render: (v, r) => `₹${v !== undefined && v !== null && !isNaN(Number(v)) && Number(v) > 0 ? Number(v) : (r.quantity > 0 && r.amount ? Number((r.amount / r.quantity).toFixed(2)) : 70)}` },
+                { key: "amount", label: "कुल राशि", mono: true, render: (v, r) => fmt((v !== undefined && v !== null && !isNaN(Number(v)) && Number(v) > 0) ? Number(v) : (r.amount || ((r.quantity || r.liters || 0) * (r.rate || 70)))) },
               ]}
               rows={customerFilteredSales}
               onDelete={deleteCustomerSale}

@@ -727,7 +727,7 @@ export const MilkSellingHub = () => {
           return !sh.includes('ev') && sh !== 'night' && !sh.includes('शाम');
         })
         .reduce((sum, s) => sum + Number(s.quantity || 0), 0)
-        .toFixed(1)
+        .toFixed(2)
     );
   }, [filteredCustomerSales]);
 
@@ -739,7 +739,7 @@ export const MilkSellingHub = () => {
           return sh.includes('ev') || sh === 'night' || sh.includes('शाम');
         })
         .reduce((sum, s) => sum + Number(s.quantity || 0), 0)
-        .toFixed(1)
+        .toFixed(2)
     );
   }, [filteredCustomerSales]);
 
@@ -747,14 +747,15 @@ export const MilkSellingHub = () => {
     return Number(
       filteredCustomerSales
         .reduce((sum, s) => sum + Number(s.quantity || 0), 0)
-        .toFixed(1)
+        .toFixed(2)
     );
   }, [filteredCustomerSales]);
 
   const customerTotalAmount = useMemo(() => {
-    return Math.round(
+    return Number(
       filteredCustomerSales
-        .reduce((sum, s) => sum + Number(s.amount || 0), 0)
+        .reduce((sum, s) => sum + Number(s.amount || (Number(s.quantity || 0) * Number(s.rate || 70))), 0)
+        .toFixed(2)
     );
   }, [filteredCustomerSales]);
 
@@ -2279,9 +2280,9 @@ export const MilkSellingHub = () => {
                       <tr className="bg-slate-100/90 text-slate-600 text-[11px] border-b border-slate-200">
                         <td className="p-2.5 font-bold">📄 इस पृष्ठ का योग (P.{customerPage}):</td>
                         <td className="p-2.5 text-slate-500 font-normal">{paginatedCustomerSales.length} प्रविष्टियां</td>
-                        <td className="p-2.5 text-right font-black text-slate-900">{customerPageTotals.totalQty.toFixed(1)} L</td>
+                        <td className="p-2.5 text-right font-black text-slate-900">{Number(customerPageTotals.totalQty.toFixed(2))} L</td>
                         <td className="p-2.5 text-right font-bold">₹{customerPageTotals.avgRate.toFixed(2)}</td>
-                        <td className="p-2.5 text-right font-black text-emerald-700">₹{customerPageTotals.totalAmt.toLocaleString('en-IN')}</td>
+                        <td className="p-2.5 text-right font-black text-emerald-700">₹{Number(customerPageTotals.totalAmt.toFixed(2)).toLocaleString('en-IN')}</td>
                         <td colSpan="2" className="p-2.5"></td>
                       </tr>
                     )}
@@ -2293,7 +2294,7 @@ export const MilkSellingHub = () => {
                         {customerGrandTotals.count} ग्राहक प्रविष्टियां
                       </td>
                       <td className="p-3 text-right font-black text-indigo-950 text-sm whitespace-nowrap">
-                        <div>{customerGrandTotals.totalQty.toFixed(1)} L</div>
+                        <div>{Number(customerGrandTotals.totalQty.toFixed(2))} L</div>
                         {customerGrandTotals.distinctDays > 1 && (
                           <div className="text-[10px] font-bold text-teal-700">
                             ({customerGrandTotals.avgDailyLiters} L/दिन)
@@ -2304,7 +2305,7 @@ export const MilkSellingHub = () => {
                         औसत ₹{customerGrandTotals.avgRate.toFixed(2)}
                       </td>
                       <td className="p-3 text-right font-black text-emerald-800 text-sm sm:text-base whitespace-nowrap">
-                        ₹{customerGrandTotals.totalAmt.toLocaleString('en-IN')}
+                        ₹{Number(customerGrandTotals.totalAmt.toFixed(2)).toLocaleString('en-IN')}
                       </td>
                       <td colSpan="2" className="p-3"></td>
                     </tr>

@@ -373,8 +373,8 @@ export const dbService = {
 
       rawDeliveries.forEach(d => {
         const liters = Number(d.milk_liters) || 0;
-        const bill = d.bill_amount !== null && d.bill_amount !== undefined ? Number(d.bill_amount) : (liters > 0 ? liters * 70 : 0);
-        const rate = liters > 0 && bill > 0 ? Math.round(bill / liters) : 70;
+        const bill = d.bill_amount !== null && d.bill_amount !== undefined ? Number(d.bill_amount) : (liters > 0 ? Number((liters * 70).toFixed(2)) : 0);
+        const rate = liters > 0 && bill > 0 ? Number((bill / liters).toFixed(2)) : 70;
         const shift = String(d.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
         const name = (d.customer_name_original || 'ग्राहक').trim();
         const date = d.delivery_date;
@@ -553,7 +553,7 @@ export const dbService = {
     try {
       const liters = Number(sale.quantity) || 0;
       const rate = Number(sale.rate) || 70;
-      const amount = Number(sale.amount) || Math.round(liters * rate);
+      const amount = Number(sale.amount) || Number((liters * rate).toFixed(2));
       const shift = String(sale.shift || 'morning').toUpperCase();
       const rawCustId = sale.customerId ? parseInt(String(sale.customerId).replace(/\D/g, '')) : null;
 
@@ -598,7 +598,7 @@ export const dbService = {
       const payloads = sales.map(sale => {
         const liters = Number(sale.quantity) || 0;
         const rate = Number(sale.rate) || 70;
-        const amount = Number(sale.amount) || Math.round(liters * rate);
+        const amount = Number(sale.amount) || Number((liters * rate).toFixed(2));
         const shift = String(sale.shift || 'morning').toUpperCase();
         const rawCustId = sale.customerId ? parseInt(String(sale.customerId).replace(/\D/g, '')) : null;
         const delId = sale.deliveryId || nextId++;

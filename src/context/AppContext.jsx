@@ -59,15 +59,18 @@ export const AppProvider = ({ children }) => {
   // Animals
   const [animals, setAnimals] = useState(() => safeGetItem('dairy_animals', []));
 
-  // Helper to normalize milk rates (auto-heal old 60/- to correct 70/- rate)
+  // Helper to normalize milk rates while preserving exact amounts from Sheets/Supabase
   const healCustomerSale = (s) => {
     if (!s) return s;
     const r = Number(s.rate);
     const q = Number(s.quantity || s.liters || 0);
-    if (!r || r === 60 || isNaN(r)) {
-      return { ...s, rate: 70, amount: Math.round(q * 70) };
+    const amt = (s.amount !== undefined && s.amount !== null && !isNaN(Number(s.amount)) && Number(s.amount) > 0)
+      ? Number(s.amount)
+      : Number((q * (r || 70)).toFixed(2));
+    if (!r || isNaN(r)) {
+      return { ...s, rate: 70, amount: amt };
     }
-    return s;
+    return { ...s, amount: amt };
   };
 
   const healCustomerTransaction = (t) => {
@@ -75,14 +78,18 @@ export const AppProvider = ({ children }) => {
     if (t.type === 'milk_supply') {
       const r = Number(t.rate);
       const l = Number(t.liters || 0);
-      if (!r || r === 60 || isNaN(r)) {
+      const amt = (t.amount !== undefined && t.amount !== null && !isNaN(Number(t.amount)) && Number(t.amount) > 0)
+        ? Number(t.amount)
+        : Number((l * (r || 70)).toFixed(2));
+      if (!r || isNaN(r)) {
         return {
           ...t,
           rate: 70,
-          amount: Math.round(l * 70),
+          amount: amt,
           note: t.note ? t.note.replace('@ ₹60', '@ ₹70').replace('@ ₹60/L', '@ ₹70/L') : t.note
         };
       }
+      return { ...t, amount: amt };
     }
     return t;
   };
@@ -353,11 +360,16 @@ export const AppProvider = ({ children }) => {
         if (res.ok) {
           const freshData = await res.json();
           if (freshData) {
-            baseDb = freshData;
-            idbStorage.set('dairy_full_database', freshData).catch(() => {});
+            if (!baseDb || (freshData.customerSales?.length || 0) >= (baseDb.customerSales?.length || 0)) {
+              baseDb = freshData;
+              idbStorage.set('dairy_full_database', freshData).catch(() => {});
+            }
           }
         }
       } catch (e) {}
+
+      // Automatically trigger full unlimited Supabase cloud load if forced or baseDb has less than 10,000 sales
+      const shouldLoadFullCloud = forceCloud || !baseDb || (baseDb?.customerSales?.length || 0) < 10000;
 
       // 2. Fetch live Supabase deliveries & metadata in parallel (Zero Limits)
       // Covers current active month and latest records by ID without any truncation
@@ -409,11 +421,14 @@ export const AppProvider = ({ children }) => {
           .select('*')
           .order('created_at', { ascending: false })
           .catch(() => ({ data: [] })),
-        (!baseDb) ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
+        shouldLoadFullCloud ? dbService.loadAll().catch(() => null) : Promise.resolve(null)
       ]);
 
       // 3. COMBINE EVERYTHING IN MEMORY (ZERO INTERMEDIATE RENDERS)
-      let finalAnimals = baseDb?.animals || cloudDb?.animals || animalsRef.current;
+      // Give full precedence to live cloudDb when available
+      const activeDb = (cloudDb && (cloudDb.customerSales?.length || 0) > 0) ? cloudDb : baseDb;
+
+      let finalAnimals = activeDb?.animals || baseDb?.animals || cloudDb?.animals || animalsRef.current;
       if (Array.isArray(cloudAnimalsRes?.data) && cloudAnimalsRes.data.length > 0) {
         const animMap = new Map();
         finalAnimals.forEach(a => { if (a.id) animMap.set(a.id, a); });
@@ -442,14 +457,14 @@ export const AppProvider = ({ children }) => {
         finalAnimals = Array.from(animMap.values());
       }
 
-      let finalCustomers = (baseDb?.customers || cloudDb?.customers || customersRef.current).map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
-      let finalTxns = (baseDb?.customerTransactions || cloudDb?.customerTransactions || customerTransactionsRef.current).map(healCustomerTransaction);
-      let finalSales = (baseDb?.customerSales || cloudDb?.customerSales || customerSalesRef.current).map(healCustomerSale);
-      let finalMilkEntries = baseDb?.milkEntries || cloudDb?.milkEntries || [];
-      let finalDairySales = baseDb?.dairySales || cloudDb?.dairySales || [];
-      let finalRateMaster = baseDb?.rateMasterConfig || cloudDb?.rateMasterConfig || null;
+      let finalCustomers = (activeDb?.customers || baseDb?.customers || cloudDb?.customers || customersRef.current).map(c => (!c.rate || Number(c.rate) === 60) ? { ...c, rate: 70 } : c);
+      let finalTxns = (activeDb?.customerTransactions || baseDb?.customerTransactions || cloudDb?.customerTransactions || customerTransactionsRef.current).map(healCustomerTransaction);
+      let finalSales = (activeDb?.customerSales || baseDb?.customerSales || cloudDb?.customerSales || customerSalesRef.current).map(healCustomerSale);
+      let finalMilkEntries = activeDb?.milkEntries || baseDb?.milkEntries || cloudDb?.milkEntries || [];
+      let finalDairySales = activeDb?.dairySales || baseDb?.dairySales || cloudDb?.dairySales || [];
+      let finalRateMaster = activeDb?.rateMasterConfig || baseDb?.rateMasterConfig || cloudDb?.rateMasterConfig || null;
 
-      let finalExpenses = baseDb?.expenses || cloudDb?.expenses || [];
+      let finalExpenses = activeDb?.expenses || baseDb?.expenses || cloudDb?.expenses || [];
       if (Array.isArray(cloudExpensesRes?.data) && cloudExpensesRes.data.length > 0) {
         const expMap = new Map();
         finalExpenses.forEach(e => { if (e.id) expMap.set(e.id, e); });
@@ -468,9 +483,9 @@ export const AppProvider = ({ children }) => {
         finalExpenses = Array.from(expMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       }
 
-      let finalFeedStock = baseDb?.feedStock || cloudDb?.feedStock || [];
+      let finalFeedStock = activeDb?.feedStock || baseDb?.feedStock || cloudDb?.feedStock || [];
 
-      let finalHealthRecords = baseDb?.healthRecords || cloudDb?.healthRecords || [];
+      let finalHealthRecords = activeDb?.healthRecords || baseDb?.healthRecords || cloudDb?.healthRecords || [];
       if (Array.isArray(cloudHealthRes?.data) && cloudHealthRes.data.length > 0) {
         const hltMap = new Map();
         finalHealthRecords.forEach(h => { if (h.id) hltMap.set(h.id, h); });
@@ -491,7 +506,7 @@ export const AppProvider = ({ children }) => {
         finalHealthRecords = Array.from(hltMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       }
 
-      let finalVaccinations = baseDb?.vaccinations || cloudDb?.vaccinations || [];
+      let finalVaccinations = activeDb?.vaccinations || baseDb?.vaccinations || cloudDb?.vaccinations || [];
       if (Array.isArray(cloudVacRes?.data) && cloudVacRes.data.length > 0) {
         const vacMap = new Map();
         finalVaccinations.forEach(v => { if (v.id) vacMap.set(v.id, v); });
@@ -509,7 +524,7 @@ export const AppProvider = ({ children }) => {
       }
 
       // Breeding Records: Merge all Supabase breeding records into memory (giving precedence to cloud data)
-      let finalBreedingRecords = baseDb?.breedingRecords || cloudDb?.breedingRecords || [];
+      let finalBreedingRecords = activeDb?.breedingRecords || baseDb?.breedingRecords || cloudDb?.breedingRecords || [];
       if (Array.isArray(cloudBreedingRes?.data) && cloudBreedingRes.data.length > 0) {
         const brdMap = new Map();
         finalBreedingRecords.forEach(b => { if (b.id) brdMap.set(b.id, b); });
@@ -585,8 +600,8 @@ export const AppProvider = ({ children }) => {
           const shift = String(row.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
           const name = (row.customer_name_original || 'ग्राहक').trim();
           const qty = Number(row.milk_liters) || 0;
-          const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Math.round(qty * 70);
-          const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
+          const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Number((qty * 70).toFixed(2));
+          const rate = qty > 0 && bill > 0 ? Number((bill / qty).toFixed(2)) : 70;
           const fp = `${name.toLowerCase()}_${date}_${shift}`;
 
           if (seenBatchFps.has(fp)) return; // Prevent any stream duplicates
@@ -873,8 +888,8 @@ export const AppProvider = ({ children }) => {
         const shift = String(row.delivery_time || 'MORNING').toLowerCase().includes('ev') ? 'evening' : 'morning';
         const name = (row.customer_name_original || 'ग्राहक').trim();
         const qty = Number(row.milk_liters) || 0;
-        const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Math.round(qty * 70);
-        const rate = qty > 0 && bill > 0 ? Math.round(bill / qty) : 70;
+        const bill = row.bill_amount !== null && row.bill_amount !== undefined ? Number(row.bill_amount) : Number((qty * 70).toFixed(2));
+        const rate = qty > 0 && bill > 0 ? Number((bill / qty).toFixed(2)) : 70;
         const fp = `${name.toLowerCase()}_${date}_${shift}`;
 
         if (seenBatchFps.has(fp)) return;
@@ -1912,12 +1927,12 @@ export const AppProvider = ({ children }) => {
       if (rateIdx !== -1) {
         rate = parseFloat(cols[rateIdx]?.replace(/[^0-9.]/g, '')) || 70;
       } else if (totalAmountFromSheet && qty > 0) {
-        rate = Math.round(totalAmountFromSheet / qty) || 70;
+        rate = Number((totalAmountFromSheet / qty).toFixed(2)) || 70;
       }
-      if (rate === 60 || !rate || isNaN(rate)) {
+      if (!rate || isNaN(rate)) {
         rate = 70;
       }
-      const finalAmount = totalAmountFromSheet && totalAmountFromSheet > 0 ? totalAmountFromSheet : Math.round(qty * rate);
+      const finalAmount = totalAmountFromSheet && totalAmountFromSheet > 0 ? totalAmountFromSheet : Number((qty * rate).toFixed(2));
 
       let cashPayment = 0;
       if (cashPmtIdx !== -1 && cols[cashPmtIdx]) {
@@ -2525,25 +2540,25 @@ export const AppProvider = ({ children }) => {
       pregnantCount,
       sickCount,
 
-      // Production
-      todayMilkTotal: Number(todayMilkTotal.toFixed(1)),
-      morningMilk: Number(morningMilk.toFixed(1)),
-      eveningMilk: Number(eveningMilk.toFixed(1)),
-      totalMilkVolume: Number(totalMilkVolume.toFixed(1)),
+      // Production (Exact 2-decimal precision matching Google Sheets)
+      todayMilkTotal: Number(todayMilkTotal.toFixed(2)),
+      morningMilk: Number(morningMilk.toFixed(2)),
+      eveningMilk: Number(eveningMilk.toFixed(2)),
+      totalMilkVolume: Number(totalMilkVolume.toFixed(2)),
 
       // Sales Breakdown
-      todayCustomerSaleVolume: Number(todayCustomerSaleVolume.toFixed(1)),
-      todayCustomerSaleAmount: Math.round(todayCustomerSaleAmount),
-      todayMorningCustomerSale: Number(todayMorningCustomerSale.toFixed(1)),
-      todayEveningCustomerSale: Number(todayEveningCustomerSale.toFixed(1)),
+      todayCustomerSaleVolume: Number(todayCustomerSaleVolume.toFixed(2)),
+      todayCustomerSaleAmount: Number(todayCustomerSaleAmount.toFixed(2)),
+      todayMorningCustomerSale: Number(todayMorningCustomerSale.toFixed(2)),
+      todayEveningCustomerSale: Number(todayEveningCustomerSale.toFixed(2)),
 
-      todayDairySaleVolume: Number(todayDairySaleVolume.toFixed(1)),
-      todayDairySaleAmount: Math.round(todayDairySaleAmount),
-      todayMorningDairySale: Number(todayMorningDairySale.toFixed(1)),
-      todayEveningDairySale: Number(todayEveningDairySale.toFixed(1)),
+      todayDairySaleVolume: Number(todayDairySaleVolume.toFixed(2)),
+      todayDairySaleAmount: Number(todayDairySaleAmount.toFixed(2)),
+      todayMorningDairySale: Number(todayMorningDairySale.toFixed(2)),
+      todayEveningDairySale: Number(todayEveningDairySale.toFixed(2)),
 
-      todayTotalSaleVolume: Number(todayTotalSaleVolume.toFixed(1)),
-      todayTotalSaleAmount: Math.round(todayTotalSaleAmount),
+      todayTotalSaleVolume: Number(todayTotalSaleVolume.toFixed(2)),
+      todayTotalSaleAmount: Number(todayTotalSaleAmount.toFixed(2)),
       todayMilkBalance,
 
       // Financials & Stock
